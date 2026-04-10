@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Darts">
-<link rel="apple-touch-icon" href="icons/icon-512.png">
+<link rel="apple-touch-icon" href="icon-512.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -283,6 +283,31 @@ async function fbLoadHistory() {
   } catch(e) { console.error(e); return []; }
 }
 
+async function deleteGame(id) {
+  if (!confirm('Poistetaanko peli?')) return;
+  if (!db) return;
+  try {
+    await db.collection('darts_games').doc(id).delete();
+    S.history = S.history.filter(g => g.id !== id);
+    render();
+    showToast('Peli poistettu', 'success');
+  } catch(e) { showToast('Poisto epäonnistui','error'); }
+}
+
+async function deleteAllGames() {
+  if (!confirm('Poistetaanko KAIKKI pelit? Tätä ei voi peruuttaa.')) return;
+  if (!db) return;
+  try {
+    const snap = await db.collection('darts_games').get();
+    const batch = db.batch();
+    snap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    S.history = [];
+    render();
+    showToast('Kaikki pelit poistettu', 'success');
+  } catch(e) { showToast('Poisto epäonnistui','error'); }
+}
+
 // ==================== STATE ====================
 let S = {
   screen: 'home',
@@ -420,9 +445,7 @@ function renderHome() {
       <button class="menu-btn" onclick="goStats()">
         <span class="icon">📊</span><span class="label">Tilastot</span><span class="arrow">›</span>
       </button>
-      <button class="menu-btn" onclick="nav('settings')">
-        <span class="icon">⚙️</span><span class="label">Asetukset (Firebase)</span><span class="arrow">›</span>
-      </button>
+
     </div>
   `;
   return div;
@@ -708,6 +731,14 @@ function renderX01() {
     ? `<span style="color:${modT?'var(--accent)':'var(--blue)'}">[ ${g.modifier} aktiivinen ]</span>`
     : 'pistettä jäljellä';
 
+  const dartsLeft = 3 - g.currentDarts.length;
+  const co = getCheckout(p.score, g.checkoutMode, dartsLeft);
+  const coHtml = co
+    ? `<div style="background:rgba(0,232,122,0.1);border:1px solid rgba(0,232,122,0.3);border-radius:10px;padding:7px 14px;margin:0 16px 2px;text-align:center;flex-shrink:0;">
+        <span style="font-size:10px;color:var(--accent);letter-spacing:2px;">💡 CHECKOUT</span><br>
+        <span style="font-family:var(--fd);font-size:22px;letter-spacing:2px;">${co.join(' → ')}</span>
+       </div>` : '';
+
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px 4px;">
@@ -721,6 +752,7 @@ function renderX01() {
       <div class="cur-score" id="cscore">${p.score}</div>
       <div class="score-sub">${subLabel}</div>
     </div>
+    ${coHtml}
     <div class="darts-thrown">${chips}</div>
     <div class="input-area">
       <div class="modifier-row">
@@ -796,11 +828,69 @@ function processX01(dart) {
     return;
   }
 
-  // Remaining = 1 with double/master out – can still throw but bust is likely
+  // Remaining = 1 with double/master out → impossible, immediate bust
+  if (newScore === 1 && (g.checkoutMode === 'double' || g.checkoutMode === 'master')) {
+    g.currentDarts.push(dart);
+    showBust(() => {
+      p.score = g.turnStartScore;
+      p.history.push({ darts:[...g.currentDarts], bust:true });
+      g.currentDarts = []; g.modifier = null;
+      advanceX01();
+    });
+    return;
+  }
+
   g.currentDarts.push(dart);
   p.score = newScore;
   if (g.currentDarts.length >= 3) setTimeout(()=>x01Next(),300);
   else render();
+}
+
+// ==================== CHECKOUT FINDER ====================
+(function buildCheckouts() {
+  const all = [];
+  for(let i=1;i<=20;i++){
+    all.push({d:String(i),v:i});
+    all.push({d:'D'+i,v:i*2,fin:true});
+    all.push({d:'T'+i,v:i*3});
+  }
+  all.push({d:'25',v:25});
+  all.push({d:'Bull',v:50,fin:true});
+  const fins = all.filter(x=>x.fin);
+  const _co = {};
+
+  // 1 dart
+  for(const f of fins) _co[f.v] = [f.d];
+
+  // 2 darts
+  for(const d1 of all){
+    for(const f of fins){
+      const tot = d1.v+f.v;
+      if(tot>=2&&tot<=170&&!_co[tot]) _co[tot]=[d1.d,f.d];
+    }
+  }
+
+  // 3 darts – prefer highest first dart
+  const sorted = [...all].sort((a,b)=>b.v-a.v);
+  for(const d1 of sorted){
+    for(const d2 of all){
+      for(const f of fins){
+        const tot=d1.v+d2.v+f.v;
+        if(tot>=2&&tot<=170&&!_co[tot]) _co[tot]=[d1.d,d2.d,f.d];
+      }
+    }
+  }
+  window._checkouts = _co;
+})();
+
+function getCheckout(remaining, mode, dartsLeft) {
+  if(!remaining||remaining<2||remaining>170) return null;
+  if(mode==='any'||mode==='single') return null;
+  const co = window._checkouts?.[remaining];
+  if(!co) return null;
+  // Only show if achievable with darts left
+  if(co.length > dartsLeft) return null;
+  return co;
 }
 
 function x01Undo() {
@@ -1278,11 +1368,17 @@ function renderHistory() {
   if(!S.historyLoaded){content=`<div class="loader">⏳ Ladataan...</div>`;}
   else if(!S.history.length){content=`<div class="empty-state"><span class="ei">📋</span><p>Ei tallennettuja pelejä vielä.<br>Aloita ensimmäinen peli!</p></div>`;}
   else{
-    content=`<div class="history-list">`+S.history.map(g=>`
+    content=`<div style="padding:10px 14px 2px;display:flex;justify-content:flex-end;">
+        <button onclick="deleteAllGames()" style="background:none;border:1px solid var(--red);color:var(--red);font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;font-family:var(--fu);font-weight:600;">🗑 Tyhjennä kaikki</button>
+      </div>
+      <div class="history-list">`+S.history.map(g=>`
       <div class="history-card">
         <div class="history-card-header">
           <div class="h-type">${GAMES.find(t=>t.id===g.type)?.name||g.type||'?'}</div>
-          <div class="h-date">${fmtDate(g.createdAt)}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="h-date">${fmtDate(g.createdAt)}</div>
+            <button onclick="deleteGame('${g.id}')" style="background:none;border:1px solid var(--red);color:var(--red);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;">✕</button>
+          </div>
         </div>
         ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:''}
         <div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>
@@ -1387,13 +1483,12 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 initFirebase();
 render();
 </script>
-
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
-      .then(() => console.log('SW ok'))
-      .catch(e => console.warn('SW fail:', e));
+      .then(r => console.log('SW registered'))
+      .catch(e => console.log('SW error:', e));
   });
 }
 </script>
