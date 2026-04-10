@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🎯 DartsApp</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#00e87a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Darts">
+<link rel="apple-touch-icon" href="icons/icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+<style>
+:root {
+  --bg: #08080f;
+  --surface: #0f0f1a;
+  --card: #161622;
+  --card2: #1c1c2c;
+  --border: #252538;
+  --accent: #00e87a;
+  --accent2: #00b05c;
+  --red: #ff3355;
+  --gold: #ffd700;
+  --blue: #4488ff;
+  --text: #e8e8f0;
+  --muted: #6060a0;
+  --fd: 'Bebas Neue', sans-serif;
+  --fu: 'Barlow Condensed', sans-serif;
+  --fb: 'Barlow', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--fu); overflow:hidden; }
+#app { height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+.screen { flex:1; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; }
+
+.header {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:12px 16px; display:flex; align-items:center; gap:12px;
+  flex-shrink:0; position:sticky; top:0; z-index:10;
+}
+.header-title { font-family:var(--fd); font-size:22px; letter-spacing:1px; color:var(--accent); flex:1; }
+.back-btn {
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  padding:8px 14px; border-radius:8px; font-family:var(--fu); font-size:14px; font-weight:600; cursor:pointer;
+}
+.back-btn:active { opacity:0.7; }
+
+/* HOME */
+.home-logo { text-align:center; padding:36px 20px 16px; }
+.home-logo .dart { font-size:60px; display:block; margin-bottom:6px; }
+.home-logo h1 { font-family:var(--fd); font-size:56px; letter-spacing:6px; color:var(--accent); text-shadow:0 0 40px rgba(0,232,122,0.35); }
+.home-logo p { color:var(--muted); font-size:12px; letter-spacing:3px; text-transform:uppercase; margin-top:4px; }
+.home-menu { padding:16px; display:flex; flex-direction:column; gap:10px; }
+.menu-btn {
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  padding:18px 20px; border-radius:12px; font-family:var(--fu); font-size:17px; font-weight:600; letter-spacing:1px;
+  cursor:pointer; text-align:left; display:flex; align-items:center; gap:12px; transition:all 0.12s;
+}
+.menu-btn:active { transform:scale(0.97); }
+.menu-btn.primary {
+  background:linear-gradient(135deg,var(--accent2),var(--accent));
+  border-color:var(--accent); color:#000; font-size:20px; padding:22px 20px;
+}
+.menu-btn .icon { font-size:22px; }
+.menu-btn .label { flex:1; }
+.menu-btn .arrow { color:var(--muted); font-size:18px; }
+.menu-btn.primary .arrow { color:rgba(0,0,0,0.4); }
+
+/* GAME TYPE LIST */
+.game-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
+.game-card {
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  padding:14px 16px; cursor:pointer; transition:all 0.12s; display:flex; align-items:center; gap:14px;
+}
+.game-card:active { transform:scale(0.97); background:var(--card2); }
+.game-card.featured { border-color:rgba(0,232,122,0.4); }
+.game-icon { font-size:26px; }
+.game-info { flex:1; }
+.game-name { font-family:var(--fd); font-size:22px; letter-spacing:1px; }
+.game-desc { font-size:12px; color:var(--muted); margin-top:2px; }
+.badge { background:var(--accent); color:#000; font-size:10px; font-weight:700; padding:3px 7px; border-radius:20px; }
+
+/* CONFIG */
+.config-section { padding:14px 16px; border-bottom:1px solid var(--border); }
+.config-label { font-size:11px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:10px; }
+.option-row { display:flex; gap:8px; flex-wrap:wrap; }
+.option-btn {
+  background:var(--card); border:1px solid var(--border); color:var(--text);
+  padding:10px 14px; border-radius:8px; font-family:var(--fu); font-size:14px; font-weight:600; cursor:pointer;
+}
+.option-btn.selected { background:var(--accent); border-color:var(--accent); color:#000; }
+
+/* PLAYERS */
+.players-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
+.player-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; display:flex; align-items:center; gap:12px; }
+.player-avatar { width:40px; height:40px; border-radius:50%; background:var(--accent2); display:flex; align-items:center; justify-content:center; font-family:var(--fd); font-size:18px; color:#000; flex-shrink:0; }
+.player-name { flex:1; font-size:16px; font-weight:600; }
+.player-stat { font-size:11px; color:var(--muted); }
+.player-del { background:none; border:1px solid var(--red); color:var(--red); padding:6px 10px; border-radius:7px; font-size:12px; cursor:pointer; }
+.add-player-form { padding:14px; display:flex; gap:10px; }
+.text-input {
+  flex:1; background:var(--card); border:1px solid var(--border); color:var(--text);
+  padding:12px 16px; border-radius:10px; font-family:var(--fu); font-size:16px; outline:none;
+}
+.text-input:focus { border-color:var(--accent); }
+
+/* PLAYER SELECT */
+.player-select-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
+.player-select-card {
+  background:var(--card); border:2px solid var(--border); border-radius:12px;
+  padding:13px 15px; cursor:pointer; display:flex; align-items:center; gap:12px; transition:all 0.12s;
+}
+.player-select-card.selected { border-color:var(--accent); background:rgba(0,232,122,0.07); }
+.checkmark { width:24px; height:24px; border-radius:50%; border:2px solid var(--border); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:12px; }
+.player-select-card.selected .checkmark { background:var(--accent); border-color:var(--accent); color:#000; }
+
+/* BUTTONS */
+.btn {
+  background:var(--accent); border:none; color:#000; padding:12px 18px;
+  border-radius:10px; font-family:var(--fu); font-size:14px; font-weight:700; cursor:pointer; transition:all 0.12s;
+}
+.btn:active { transform:scale(0.95); }
+.btn.secondary { background:var(--card); border:1px solid var(--border); color:var(--text); }
+.btn.large { padding:16px 24px; font-size:16px; width:100%; }
+.btn.disabled { opacity:0.35; pointer-events:none; }
+.btn.danger { background:var(--red); color:#fff; }
+
+/* NUMBER SPINNER */
+.number-input-row { display:flex; align-items:center; gap:12px; padding:6px 0; }
+.number-spinner { background:var(--card); border:1px solid var(--border); color:var(--text); padding:10px; border-radius:8px; font-family:var(--fd); font-size:28px; width:110px; text-align:center; outline:none; }
+.spinner-btn { background:var(--card2); border:1px solid var(--border); color:var(--text); width:42px; height:42px; border-radius:8px; font-size:22px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+
+/* GAME SCREEN - X01 */
+.game-header { background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+.player-tabs { display:flex; overflow-x:auto; scrollbar-width:none; padding:0 6px; gap:2px; }
+.player-tabs::-webkit-scrollbar { display:none; }
+.player-tab { flex-shrink:0; padding:10px 12px; font-family:var(--fu); font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; white-space:nowrap; }
+.player-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+.score-board { padding:12px 16px; text-align:center; flex-shrink:0; }
+.cur-player-name { font-size:12px; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:2px; }
+.cur-score { font-family:var(--fd); font-size:88px; line-height:1; color:var(--text); letter-spacing:-2px; transition:color 0.2s; }
+.cur-score.bust { color:var(--red); }
+.cur-score.win { color:var(--accent); }
+.score-sub { font-size:12px; color:var(--muted); margin-top:3px; min-height:18px; }
+
+.darts-thrown { display:flex; justify-content:center; gap:7px; padding:6px 16px; flex-shrink:0; }
+.dart-chip { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:5px 11px; font-family:var(--fd); font-size:18px; color:var(--text); min-width:52px; text-align:center; }
+.dart-chip.empty { color:var(--muted); border-style:dashed; }
+.dart-chip.miss { color:var(--muted); }
+.dart-chip.triple { color:var(--accent); border-color:rgba(0,232,122,0.4); }
+.dart-chip.double { color:var(--blue); border-color:rgba(68,136,255,0.4); }
+.dart-chip.bull { color:var(--gold); border-color:rgba(255,215,0,0.4); }
+
+.input-area { flex:1; display:flex; flex-direction:column; padding:8px; gap:7px; overflow:hidden; min-height:0; }
+.modifier-row { display:flex; gap:7px; flex-shrink:0; }
+.mod-btn {
+  flex:1; background:var(--card); border:2px solid var(--border); color:var(--text);
+  padding:11px 6px; border-radius:10px; font-family:var(--fd); font-size:18px; letter-spacing:1px;
+  cursor:pointer; transition:all 0.12s; line-height:1;
+}
+.mod-btn:active { transform:scale(0.93); }
+.mod-btn.active-T { background:rgba(0,232,122,0.12); border-color:var(--accent); color:var(--accent); }
+.mod-btn.active-D { background:rgba(68,136,255,0.12); border-color:var(--blue); color:var(--blue); }
+.mod-btn.miss-btn { background:rgba(255,51,85,0.08); border-color:rgba(255,51,85,0.4); color:var(--red); }
+.mod-btn.undo-btn { color:var(--muted); }
+
+.number-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; flex:1; min-height:0; }
+.num-btn {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  border-radius:10px; font-family:var(--fd); font-size:22px; cursor:pointer;
+  transition:all 0.08s; display:flex; align-items:center; justify-content:center; line-height:1;
+}
+.num-btn:active { transform:scale(0.88); background:var(--card); }
+.num-btn.bull-btn { grid-column:span 2; background:rgba(255,215,0,0.07); border-color:rgba(255,215,0,0.25); color:var(--gold); font-size:16px; }
+.num-btn.next-btn { grid-column:span 3; background:var(--accent); border-color:var(--accent); color:#000; font-size:15px; font-family:var(--fu); font-weight:700; letter-spacing:1px; }
+
+/* CRICKET */
+.cricket-marks-cell { text-align:center; font-size:20px; line-height:1.2; }
+.cricket-pts-cell { font-family:var(--fd); font-size:18px; text-align:center; color:var(--accent); }
+.cricket-num-grid { display:flex; gap:7px; justify-content:center; flex-wrap:wrap; padding:6px 0; }
+.cricket-num-btn {
+  background:var(--card2); border:1px solid var(--border); color:var(--text);
+  width:50px; height:50px; border-radius:10px; font-family:var(--fd); font-size:22px;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+}
+.cricket-num-btn.bull { background:rgba(255,215,0,0.08); border-color:rgba(255,215,0,0.3); color:var(--gold); font-size:14px; }
+.cricket-num-btn:active { transform:scale(0.88); }
+
+/* GAME OVER */
+.gameover-screen { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 20px; text-align:center; }
+.trophy { font-size:80px; margin-bottom:14px; animation:bounce 0.6s ease; }
+@keyframes bounce { 0%{transform:scale(0)} 70%{transform:scale(1.1)} 100%{transform:scale(1)} }
+.winner-label { font-size:13px; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:6px; }
+.winner-name { font-family:var(--fd); font-size:56px; color:var(--gold); letter-spacing:2px; text-shadow:0 0 30px rgba(255,215,0,0.45); }
+
+/* HISTORY */
+.history-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
+.history-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+.history-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.h-type { font-family:var(--fd); font-size:20px; color:var(--accent); }
+.h-date { font-size:11px; color:var(--muted); }
+.h-winner { font-size:13px; color:var(--gold); }
+.h-players { font-size:12px; color:var(--muted); margin-top:3px; }
+
+/* STATS */
+.stats-grid { padding:14px; display:flex; flex-direction:column; gap:11px; }
+.stat-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:15px; }
+.stat-name { font-family:var(--fd); font-size:22px; margin-bottom:11px; }
+.stat-row { display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-bottom:1px solid var(--border); }
+.stat-row:last-child { border:none; }
+.stat-val { color:var(--accent); font-weight:600; }
+
+/* SETTINGS */
+.settings-section { padding:16px; }
+.settings-desc { font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:16px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px; }
+
+/* TOAST */
+.toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--card2); border:1px solid var(--border); color:var(--text); padding:11px 20px; border-radius:10px; font-size:14px; font-weight:600; z-index:1000; opacity:0; transition:opacity 0.25s; pointer-events:none; white-space:nowrap; }
+.toast.show { opacity:1; }
+.toast.success { border-color:var(--accent); color:var(--accent); }
+.toast.error { border-color:var(--red); color:var(--red); }
+
+/* BUST OVERLAY */
+.bust-overlay { position:fixed; inset:0; background:rgba(255,51,85,0.18); display:flex; align-items:center; justify-content:center; z-index:500; pointer-events:none; opacity:0; transition:opacity 0.25s; }
+.bust-text { font-family:var(--fd); font-size:90px; color:var(--red); text-shadow:0 0 50px rgba(255,51,85,0.9); letter-spacing:4px; }
+
+/* EMPTY / LOADER */
+.empty-state { padding:48px 32px; text-align:center; color:var(--muted); }
+.empty-state .ei { font-size:48px; display:block; margin-bottom:12px; }
+.empty-state p { font-size:14px; line-height:1.5; }
+.loader { display:flex; align-items:center; justify-content:center; padding:40px; color:var(--muted); font-size:14px; }
+
+/* ORDER HINT */
+.order-hint { font-size:12px; color:var(--muted); padding:6px 16px; text-align:center; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+<div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
+
+<script>
+// ==================== FIREBASE ====================
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDswdEF9J0gsHJH6Zo_8BGZrf8DVG3FwYc",
+  authDomain: "hakemuspaivakirja.firebaseapp.com",
+  projectId: "hakemuspaivakirja",
+  storageBucket: "hakemuspaivakirja.firebasestorage.app",
+  messagingSenderId: "836133210317",
+  appId: "1:836133210317:web:d85131ae272ecf1938c184"
+};
+
+let db = null;
+function initFirebase() {
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
+    db = firebase.firestore();
+    return true;
+  } catch(e) { console.error('FB init:', e); return false; }
+}
+
+async function fbSaveGame(data) {
+  if (!db) { showToast('Firebase ei konfiguroitu', 'error'); return; }
+  try {
+    await db.collection('darts_games').add({ ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    showToast('Peli tallennettu ✓', 'success');
+  } catch(e) { showToast('Tallennus epäonnistui', 'error'); console.error(e); }
+}
+
+async function fbLoadHistory() {
+  if (!db) return [];
+  try {
+    const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(60).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) { console.error(e); return []; }
+}
+
+// ==================== STATE ====================
+let S = {
+  screen: 'home',
+  players: JSON.parse(localStorage.getItem('darts_players') || '[]'),
+  setup: { gameType: null, config: {}, selected: [] },
+  game: null,
+  history: [],
+  historyLoaded: false,
+  stats: {},
+  statsLoaded: false,
+};
+
+function savePlayers() { localStorage.setItem('darts_players', JSON.stringify(S.players)); }
+function genId() { return Math.random().toString(36).slice(2,10); }
+
+// ==================== GAME DEFINITIONS ====================
+const GAMES = [
+  { id:'501',        name:'501',              icon:'🎯', desc:'Suosituin kilpailupeli. Lopeta tuplaan.', hot:true },
+  { id:'301',        name:'301',              icon:'🎯', desc:'Nopeampi versio. Sama säännöt kuin 501.', hot:true },
+  { id:'701',        name:'701',              icon:'🎯', desc:'Pidempi versio tiukoille pelaajille.' },
+  { id:'cricket',    name:'Cricket',          icon:'🏏', desc:'Avaa numerot 15–20 + Bull. Pisteet American-moodissa.', hot:true },
+  { id:'atc',        name:'Around the Clock', icon:'🕐', desc:'Osu numerot 1–20 järjestyksessä. Ensimmäinen läpi voittaa.' },
+  { id:'shanghai',   name:'Shanghai',         icon:'🀄', desc:'7 kierrosta kohdenumeroilla. Shanghai = välitön voitto!' },
+  { id:'halveit',    name:'Halve-It',         icon:'✂️', desc:'Tavoitteet per kierros. Huti puolittaa pisteesi.' },
+  { id:'killer',     name:'Killer',           icon:'💀', desc:'Jokainen saa oman numeron. Tapa muut! (tulossa)' },
+  { id:'custom_x01', name:'Oma X01',          icon:'⚙️', desc:'Aseta aloituspisteet itse haluamallesi lukumäärälle.' },
+];
+
+const CRICKET_NUMS = [20,19,18,17,16,15,'BULL'];
+const HALVEIT_TARGETS = [20,16,'D7',14,'T10','D-BULL',17,13,'T3'];
+
+// ==================== UTILS ====================
+function dartValue(dart) {
+  if (!dart || dart === 'MISS') return 0;
+  if (dart === 'BULL') return 50;
+  if (dart === '25') return 25;
+  if (dart === 'T25') return 75; // won't happen but safe
+  const m = dart.match(/^([TDB]?)(\d+)$/);
+  if (!m) return 0;
+  const [,mod,num] = m;
+  const n = parseInt(num);
+  if (n > 20 && n !== 25) return 0;
+  if (mod === 'T') return n * 3;
+  if (mod === 'D') return n * 2;
+  return n;
+}
+
+function dartClass(d) {
+  if (!d || d === 'MISS') return 'miss';
+  if (d.startsWith('T')) return 'triple';
+  if (d.startsWith('D') || d === 'BULL') return d === 'BULL' ? 'bull' : 'double';
+  return '';
+}
+
+function marksSymbol(n) {
+  if (n <= 0) return '';
+  if (n === 1) return '/';
+  if (n === 2) return 'X';
+  return '●';
+}
+
+function validCheckout(dart, mode, remaining) {
+  const v = dartValue(dart);
+  if (v !== remaining) return false;
+  if (mode === 'any') return true;
+  if (mode === 'single') return !dart.startsWith('T') && !dart.startsWith('D') && dart !== 'BULL';
+  if (mode === 'double') return dart.startsWith('D') || dart === 'BULL';
+  if (mode === 'master') return dart.startsWith('D') || dart.startsWith('T') || dart === 'BULL';
+  return false;
+}
+
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  clearTimeout(t._t); t._t = setTimeout(() => t.className='toast', 2200);
+}
+
+function showBust(cb) {
+  const o = document.getElementById('bust-overlay');
+  o.style.opacity = '1';
+  setTimeout(() => { o.style.opacity = '0'; cb && cb(); }, 1100);
+}
+
+function fmtDate(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('fi-FI') + ' ' + d.toLocaleTimeString('fi-FI',{hour:'2-digit',minute:'2-digit'});
+}
+
+function fmtDuration(sec) {
+  if (!sec) return '';
+  const m = Math.floor(sec/60), s = sec%60;
+  return m + 'min ' + s + 's';
+}
+
+// ==================== NAV + RENDER ====================
+function nav(screen, extra={}) {
+  S.screen = screen;
+  Object.assign(S, extra);
+  render();
+}
+
+function render() {
+  const app = document.getElementById('app');
+  const fns = {
+    home: renderHome, players: renderPlayers,
+    'setup-type': renderSetupType, 'setup-config': renderSetupConfig,
+    'setup-players': renderSetupPlayers,
+    game: renderGame, gameover: renderGameOver,
+    history: renderHistory, stats: renderStats, settings: renderSettings,
+  };
+  const fn = fns[S.screen];
+  if (fn) { app.innerHTML = ''; app.appendChild(fn()); }
+}
+
+// ==================== HOME ====================
+function renderHome() {
+  const div = el('div','screen');
+  div.innerHTML = `
+    <div class="home-logo">
+      <span class="dart">🎯</span>
+      <h1>DARTS</h1>
+      <p>Pelin seurantasovellus</p>
+    </div>
+    <div class="home-menu">
+      <button class="menu-btn primary" onclick="startNew()">
+        <span class="icon">🎮</span><span class="label">UUSI PELI</span><span class="arrow">›</span>
+      </button>
+      <button class="menu-btn" onclick="nav('players')">
+        <span class="icon">👥</span><span class="label">Pelaajat</span><span class="arrow">›</span>
+      </button>
+      <button class="menu-btn" onclick="goHistory()">
+        <span class="icon">📋</span><span class="label">Historia</span><span class="arrow">›</span>
+      </button>
+      <button class="menu-btn" onclick="goStats()">
+        <span class="icon">📊</span><span class="label">Tilastot</span><span class="arrow">›</span>
+      </button>
+      <button class="menu-btn" onclick="nav('settings')">
+        <span class="icon">⚙️</span><span class="label">Asetukset (Firebase)</span><span class="arrow">›</span>
+      </button>
+    </div>
+  `;
+  return div;
+}
+
+function startNew() {
+  S.setup = { gameType:null, config:{}, selected:[] };
+  nav('setup-type');
+}
+
+// ==================== PLAYERS ====================
+function renderPlayers() {
+  const div = el('div','screen');
+  const cards = S.players.length ? S.players.map(p => `
+    <div class="player-card">
+      <div class="player-avatar">${p.name[0].toUpperCase()}</div>
+      <div style="flex:1">
+        <div class="player-name">${esc(p.name)}</div>
+        <div class="player-stat">${p.games||0} peliä · ${p.wins||0} voittoa</div>
+      </div>
+      <button class="player-del" onclick="delPlayer('${p.id}')">Poista</button>
+    </div>
+  `).join('') : `<div class="empty-state"><span class="ei">👤</span><p>Ei pelaajia vielä.<br>Lisää uusi alta.</p></div>`;
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Pelaajat</div>
+    </div>
+    <div class="add-player-form">
+      <input class="text-input" id="np" type="text" placeholder="Pelaajan nimi..." maxlength="20" autocomplete="off">
+      <button class="btn" onclick="addPlayer()">Lisää</button>
+    </div>
+    <div class="players-list">${cards}</div>
+  `;
+  div.querySelector('#np').addEventListener('keydown', e => e.key==='Enter' && addPlayer());
+  return div;
+}
+
+function addPlayer() {
+  const input = document.getElementById('np');
+  const name = input.value.trim();
+  if (!name) return;
+  if (S.players.find(p => p.name.toLowerCase() === name.toLowerCase())) { showToast('Pelaaja on jo listassa','error'); return; }
+  const p = { id:genId(), name, wins:0, games:0 };
+  S.players.push(p);
+  savePlayers();
+  nav('players');
+}
+
+function delPlayer(id) {
+  if (!confirm('Poistetaanko pelaaja?')) return;
+  S.players = S.players.filter(p => p.id !== id);
+  savePlayers();
+  nav('players');
+}
+
+// ==================== SETUP TYPE ====================
+function renderSetupType() {
+  const div = el('div','screen');
+  const cards = GAMES.map(g => `
+    <div class="game-card ${g.hot?'featured':''}" onclick="selectType('${g.id}')">
+      <div class="game-icon">${g.icon}</div>
+      <div class="game-info">
+        <div class="game-name">${g.name}</div>
+        <div class="game-desc">${g.desc}</div>
+      </div>
+      ${g.hot?'<span class="badge">SUOSITTU</span>':''}
+    </div>
+  `).join('');
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Valitse peli</div>
+    </div>
+    <div class="game-list">${cards}</div>
+  `;
+  return div;
+}
+
+function selectType(id) {
+  S.setup.gameType = id;
+  const isX01 = ['501','301','701','custom_x01'].includes(id);
+  if (isX01) {
+    const start = id==='301'?301:id==='701'?701:501;
+    S.setup.config = { startScore: start, checkoutMode:'double' };
+  } else if (id === 'cricket') {
+    S.setup.config = { cricketMode:'american' };
+  } else {
+    S.setup.config = {};
+  }
+  nav('setup-config');
+}
+
+// ==================== SETUP CONFIG ====================
+function renderSetupConfig() {
+  const div = el('div','screen');
+  const { gameType, config } = S.setup;
+  const gDef = GAMES.find(g => g.id === gameType);
+  const isX01 = ['501','301','701','custom_x01'].includes(gameType);
+
+  let body = '';
+  if (isX01) {
+    const scoreSection = gameType === 'custom_x01' ? `
+      <div class="config-section">
+        <div class="config-label">Aloituspisteet</div>
+        <div class="number-input-row">
+          <button class="spinner-btn" onclick="adjScore(-50)">−</button>
+          <input class="number-spinner" id="cscore" type="number" value="${config.startScore}" min="101" max="9999" step="50"
+            oninput="S.setup.config.startScore=Math.max(101,parseInt(this.value)||101)">
+          <button class="spinner-btn" onclick="adjScore(50)">+</button>
+        </div>
+      </div>` : '';
+    const cm = config.checkoutMode;
+    body = `
+      ${scoreSection}
+      <div class="config-section">
+        <div class="config-label">Lopetustapa</div>
+        <div class="option-row">
+          <button class="option-btn ${cm==='double'?'selected':''}" onclick="setCfg('checkoutMode','double'); render()">Double Out</button>
+          <button class="option-btn ${cm==='single'?'selected':''}" onclick="setCfg('checkoutMode','single'); render()">Single Out</button>
+          <button class="option-btn ${cm==='master'?'selected':''}" onclick="setCfg('checkoutMode','master'); render()">Master Out</button>
+          <button class="option-btn ${cm==='any'?'selected':''}" onclick="setCfg('checkoutMode','any'); render()">Vapaa</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5;">
+          <b style="color:var(--text)">Double Out</b> – lopetus tuplalla tai bullseyellä (kilpailuperinne)<br>
+          <b style="color:var(--text)">Single Out</b> – lopetus millä vain<br>
+          <b style="color:var(--text)">Master Out</b> – lopetus tuplalla tai triplalla<br>
+          <b style="color:var(--text)">Vapaa</b> – ei rajoituksia
+        </div>
+      </div>`;
+  } else if (gameType === 'cricket') {
+    const cm = config.cricketMode;
+    body = `
+      <div class="config-section">
+        <div class="config-label">Cricket-moodi</div>
+        <div class="option-row">
+          <button class="option-btn ${cm==='american'?'selected':''}" onclick="setCfg('cricketMode','american'); render()">American (pisteet)</button>
+          <button class="option-btn ${cm==='standard'?'selected':''}" onclick="setCfg('cricketMode','standard'); render()">Standard (ei pisteitä)</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--muted);line-height:1.5;">
+          <b style="color:var(--text)">American</b> – ylimääräiset osumat tuovat pisteitä (jos vastustajalla avoin)<br>
+          <b style="color:var(--text)">Standard</b> – pelkkä avaus/sulkeminen, ei pisteitä
+        </div>
+      </div>`;
+  } else if (gameType === 'killer') {
+    body = `<div class="config-section"><p style="color:var(--muted);font-size:14px;line-height:1.6;">Killer-peli on tulossa seuraavassa päivityksessä! Valitse toinen peli toistaiseksi.</p></div>`;
+  } else {
+    body = `<div class="config-section"><p style="color:var(--muted);font-size:14px;">Ei lisäasetuksia tälle pelille.</p></div>`;
+  }
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('setup-type')">‹ Takaisin</button>
+      <div class="header-title">Asetukset</div>
+    </div>
+    <div style="padding:14px 16px;">
+      <div style="font-family:var(--fd);font-size:28px;letter-spacing:1px;margin-bottom:4px;">${gDef?.icon} ${gDef?.name}</div>
+      <div style="font-size:13px;color:var(--muted);">${gDef?.desc}</div>
+    </div>
+    ${body}
+    <div style="padding:14px 16px;">
+      <button class="btn large ${gameType==='killer'?'disabled':''}" onclick="${gameType!=='killer'?'nav(\'setup-players\')':'void(0)'}">Valitse pelaajat ›</button>
+    </div>
+  `;
+  return div;
+}
+
+function setCfg(k,v) { S.setup.config[k]=v; }
+function adjScore(d) {
+  const inp = document.getElementById('cscore');
+  let v = (parseInt(inp.value)||501) + d;
+  v = Math.max(101, Math.min(9999, v));
+  inp.value = v; S.setup.config.startScore = v;
+}
+
+// ==================== SETUP PLAYERS ====================
+function renderSetupPlayers() {
+  const div = el('div','screen');
+  const sel = S.setup.selected;
+  const cards = S.players.map(p => {
+    const on = sel.includes(p.id);
+    return `
+      <div class="player-select-card ${on?'selected':''}" onclick="toggleSel('${p.id}')">
+        <div class="player-avatar">${p.name[0].toUpperCase()}</div>
+        <div class="player-name">${esc(p.name)}</div>
+        <div class="checkmark">${on?'✓':''}</div>
+      </div>`;
+  }).join('');
+  const ok = sel.length >= 1;
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('setup-config')">‹ Takaisin</button>
+      <div class="header-title">Pelaajat (${sel.length} valittu)</div>
+    </div>
+    <div class="order-hint">Valitse vähintään 1 pelaaja. Vuorojärjestys on listajärjestys.</div>
+    ${S.players.length === 0
+      ? `<div class="empty-state"><span class="ei">👤</span><p>Lisää ensin pelaajia.</p></div>
+         <div style="padding:14px;"><button class="btn large secondary" onclick="nav('players')">Lisää pelaajia</button></div>`
+      : `<div class="player-select-list">${cards}</div>
+         <div style="padding:14px;">
+           <button class="btn large ${ok?'':'disabled'}" onclick="${ok?'startGame()':'void(0)'}">Aloita peli 🎯</button>
+         </div>`}
+  `;
+  return div;
+}
+
+function toggleSel(id) {
+  const sel = S.setup.selected;
+  const i = sel.indexOf(id);
+  if (i===-1) sel.push(id); else sel.splice(i,1);
+  nav('setup-players');
+}
+
+// ==================== START GAME ====================
+function startGame() {
+  const { gameType, config, selected } = S.setup;
+  const players = selected.map(id => S.players.find(p => p.id===id)).filter(Boolean);
+  const base = { type:gameType, gameOver:false, winner:null, startTime:Date.now(), currentPlayerIndex:0, currentDarts:[], modifier:null };
+
+  const isX01 = ['501','301','701','custom_x01'].includes(gameType);
+  if (isX01) {
+    const start = config.startScore;
+    S.game = { ...base,
+      startScore:start, checkoutMode:config.checkoutMode||'double',
+      players: players.map(p => ({ id:p.id, name:p.name, score:start, history:[] })),
+      turnStartScore: start,
+    };
+  } else if (gameType === 'cricket') {
+    const blankMarks = () => { const m={}; CRICKET_NUMS.forEach(n=>m[n]=0); return m; };
+    S.game = { ...base,
+      cricketMode: config.cricketMode||'american',
+      players: players.map(p => ({ id:p.id, name:p.name, marks:blankMarks(), points:0, cPts:{}, history:[] })),
+    };
+  } else if (gameType === 'atc') {
+    S.game = { ...base, players: players.map(p => ({ id:p.id, name:p.name, target:1, history:[] })) };
+  } else if (gameType === 'shanghai') {
+    S.game = { ...base, round:1, maxRounds:7, players: players.map(p => ({ id:p.id, name:p.name, score:0, history:[] })) };
+  } else if (gameType === 'halveit') {
+    S.game = { ...base, roundIndex:0, targets:HALVEIT_TARGETS, players: players.map(p => ({ id:p.id, name:p.name, score:0, turnPts:0, history:[] })) };
+  }
+  nav('game');
+}
+
+// ==================== RENDER GAME ====================
+function renderGame() {
+  const g = S.game;
+  if (!g) return renderHome();
+  if (g.type === 'cricket') return renderCricket();
+  if (g.type === 'atc') return renderATC();
+  if (g.type === 'shanghai') return renderShanghai();
+  if (g.type === 'halveit') return renderHalveIt();
+  return renderX01();
+}
+
+// ==================== X01 GAME ====================
+function renderX01() {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  const darts = g.currentDarts;
+  const div = el('div','screen'); div.style.cssText='display:flex;flex-direction:column;height:100%;overflow:hidden;';
+
+  const gName = GAMES.find(x=>x.id===g.type)?.name || g.type.toUpperCase();
+  const coName = g.checkoutMode==='double'?'Double Out':g.checkoutMode==='single'?'Single Out':g.checkoutMode==='master'?'Master Out':'Vapaa';
+
+  const tabs = g.players.map((pl,i) =>
+    `<div class="player-tab ${i===g.currentPlayerIndex?'active':''}">
+      ${esc(pl.name)}: <strong style="font-family:var(--fd);font-size:16px;">${pl.score}</strong>
+    </div>`).join('');
+
+  const chips = [0,1,2].map(i => {
+    const d = darts[i];
+    return `<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;
+  }).join('');
+
+  const modT = g.modifier==='T', modD = g.modifier==='D';
+  let nums = '';
+  for(let n=1;n<=20;n++) nums+=`<button class="num-btn" onclick="x01Dart(${n})">${n}</button>`;
+  nums += `<button class="num-btn bull-btn" onclick="x01Bull()">BULL<br><small style="font-family:var(--fu);font-size:10px;font-weight:400;">${modD?'50':'25/50'}</small></button>`;
+  nums += `<button class="num-btn next-btn" onclick="x01Next()">SEURAAVA ›</button>`;
+
+  const subLabel = g.modifier
+    ? `<span style="color:${modT?'var(--accent)':'var(--blue)'}">[ ${g.modifier} aktiivinen ]</span>`
+    : 'pistettä jäljellä';
+
+  div.innerHTML = `
+    <div class="game-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:6px 10px;" onclick="quitGame()">✕ Lopeta</button>
+        <div style="font-size:12px;color:var(--muted);">${gName} · ${coName}</div>
+      </div>
+      <div class="player-tabs">${tabs}</div>
+    </div>
+    <div class="score-board">
+      <div class="cur-player-name">${esc(p.name)}</div>
+      <div class="cur-score" id="cscore">${p.score}</div>
+      <div class="score-sub">${subLabel}</div>
+    </div>
+    <div class="darts-thrown">${chips}</div>
+    <div class="input-area">
+      <div class="modifier-row">
+        <button class="mod-btn ${modT?'active-T':''}" onclick="toggleMod('T')">TRIPLE</button>
+        <button class="mod-btn ${modD?'active-D':''}" onclick="toggleMod('D')">DOUBLE</button>
+        <button class="mod-btn miss-btn" onclick="x01Miss()">HUTI</button>
+        <button class="mod-btn undo-btn" onclick="x01Undo()">↩ UNDO</button>
+      </div>
+      <div class="number-grid">${nums}</div>
+    </div>
+  `;
+  return div;
+}
+
+function toggleMod(m) { S.game.modifier = S.game.modifier===m?null:m; render(); }
+
+function x01Dart(num) {
+  const g = S.game;
+  if (g.currentDarts.length>=3||g.gameOver) return;
+  const dart = (g.modifier||'') + num;
+  g.modifier = null;
+  processX01(dart);
+}
+
+function x01Bull() {
+  const g = S.game;
+  if (g.currentDarts.length>=3||g.gameOver) return;
+  const dart = g.modifier==='D' ? 'BULL' : '25';
+  g.modifier = null;
+  processX01(dart);
+}
+
+function x01Miss() {
+  const g = S.game;
+  if (g.currentDarts.length>=3||g.gameOver) return;
+  g.modifier = null;
+  processX01('MISS');
+}
+
+function processX01(dart) {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  const val = dartValue(dart);
+  const newScore = p.score - val;
+
+  if (newScore < 0) {
+    g.currentDarts.push(dart);
+    showBust(() => {
+      p.score = g.turnStartScore;
+      p.history.push({ darts:[...g.currentDarts], bust:true });
+      g.currentDarts = []; g.modifier = null;
+      advanceX01();
+    });
+    return;
+  }
+
+  if (newScore === 0) {
+    if (!validCheckout(dart, g.checkoutMode, p.score)) {
+      g.currentDarts.push(dart);
+      showBust(() => {
+        p.score = g.turnStartScore;
+        p.history.push({ darts:[...g.currentDarts], bust:true });
+        g.currentDarts = []; g.modifier = null;
+        advanceX01();
+      });
+      return;
+    }
+    g.currentDarts.push(dart);
+    p.score = 0;
+    g.gameOver = true; g.winner = p; g.endTime = Date.now();
+    p.history.push({ darts:[...g.currentDarts] });
+    endGame();
+    return;
+  }
+
+  // Remaining = 1 with double/master out – can still throw but bust is likely
+  g.currentDarts.push(dart);
+  p.score = newScore;
+  if (g.currentDarts.length >= 3) setTimeout(()=>x01Next(),300);
+  else render();
+}
+
+function x01Undo() {
+  const g = S.game;
+  if (!g.currentDarts.length) return;
+  g.currentDarts.pop();
+  const p = g.players[g.currentPlayerIndex];
+  p.score = g.turnStartScore - g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
+  g.modifier = null;
+  render();
+}
+
+function x01Next() {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  if (g.currentDarts.length) {
+    const sc = g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
+    p.history.push({ darts:[...g.currentDarts], scored:sc });
+  }
+  g.currentDarts = []; g.modifier = null;
+  advanceX01();
+}
+
+function advanceX01() {
+  const g = S.game;
+  g.currentPlayerIndex = (g.currentPlayerIndex+1) % g.players.length;
+  g.turnStartScore = g.players[g.currentPlayerIndex].score;
+  render();
+}
+
+// ==================== CRICKET ====================
+function renderCricket() {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  const american = g.cricketMode === 'american';
+  const darts = g.currentDarts;
+  const div = el('div','screen'); div.style.cssText='display:flex;flex-direction:column;height:100%;overflow:hidden;';
+
+  // Dynamic grid: number col + marks per player + (points col per player if american)
+  const pCount = g.players.length;
+  const gridCols = american
+    ? `50px repeat(${pCount},1fr) repeat(${pCount},44px)`
+    : `50px repeat(${pCount},1fr)`;
+
+  const playerHeaderCells = g.players.map((pl,i) =>
+    `<div style="text-align:center;font-size:11px;color:${i===g.currentPlayerIndex?'var(--accent)':'var(--muted)'};font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px;">${i===g.currentPlayerIndex?'▶':''} ${esc(pl.name)}</div>`
+  ).join('');
+  const ptsHeaders = american ? g.players.map(()=>`<div style="text-align:center;font-size:10px;color:var(--muted);">Pts</div>`).join('') : '';
+
+  const rows = CRICKET_NUMS.map(n => {
+    const allClose = g.players.every(pl => pl.marks[n]>=3);
+    const markCells = g.players.map(pl =>
+      `<div class="cricket-marks-cell">${marksSymbol(pl.marks[n])}</div>`
+    ).join('');
+    const ptsCells = american ? g.players.map(pl =>
+      `<div class="cricket-pts-cell" style="font-size:15px;">${pl.cPts[n]||''}</div>`
+    ).join('') : '';
+    return `
+      <div style="display:grid;grid-template-columns:${gridCols};align-items:center;background:var(--card);border:1px solid ${allClose?'rgba(255,255,255,0.05)':'var(--border)'};border-radius:10px;padding:9px 7px;margin-bottom:5px;opacity:${allClose?0.4:1};">
+        <div style="text-align:center;font-family:var(--fd);font-size:22px;color:${n==='BULL'?'var(--gold)':'var(--text)'};">${n}</div>
+        ${markCells}${ptsCells}
+      </div>`;
+  }).join('');
+
+  const pointsBar = american ? `
+    <div style="display:grid;grid-template-columns:${gridCols};background:var(--surface);border-top:1px solid var(--border);padding:7px 8px;flex-shrink:0;">
+      <div style="font-size:10px;color:var(--muted);align-self:center;">Yht.</div>
+      ${g.players.map(pl=>`<div style="text-align:center;font-family:var(--fd);font-size:20px;color:var(--accent);">${pl.points}</div>`).join('')}
+      ${g.players.map(()=>`<div></div>`).join('')}
+    </div>` : '';
+
+  const chips = [0,1,2].map(i=>{const d=darts[i];return `<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;}).join('');
+  const numBtns = CRICKET_NUMS.map(n=>`<button class="cricket-num-btn ${n==='BULL'?'bull':''}" onclick="cricketDart(${n==='BULL'?'"BULL"':n})">${n}</button>`).join('');
+  const modT=g.modifier==='T', modD=g.modifier==='D';
+
+  div.innerHTML = `
+    <div class="game-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
+        <div style="font-size:12px;color:var(--muted);">CRICKET · ${american?'American':'Standard'}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:${gridCols};padding:5px 8px;border-top:1px solid var(--border);">
+        <div style="font-size:10px;color:var(--muted);">Nro</div>
+        ${playerHeaderCells}${ptsHeaders}
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:7px;">${rows}</div>
+    ${pointsBar}
+    <div style="background:var(--surface);border-top:1px solid var(--border);padding:8px 10px;flex-shrink:0;">
+      <div style="font-size:12px;color:var(--accent);text-align:center;margin-bottom:5px;font-weight:600;">▶ ${esc(p.name)}</div>
+      <div class="darts-thrown" style="padding:3px 0 7px;">${chips}</div>
+      <div class="modifier-row" style="margin-bottom:7px;">
+        <button class="mod-btn ${modT?'active-T':''}" onclick="toggleMod('T')">TRIPLE</button>
+        <button class="mod-btn ${modD?'active-D':''}" onclick="toggleMod('D')">DOUBLE</button>
+        <button class="mod-btn miss-btn" onclick="cricketMiss()">HUTI</button>
+        <button class="mod-btn undo-btn" onclick="cricketUndo()">↩</button>
+      </div>
+      <div class="cricket-num-grid">${numBtns}</div>
+      ${darts.length>0?`<button class="btn large" style="margin-top:8px;" onclick="cricketNext()">Seuraava pelaaja ›</button>`:''}
+    </div>
+  `;
+  return div;
+}
+
+function cricketDart(num) {
+  const g = S.game;
+  if (g.currentDarts.length>=3||g.gameOver) return;
+  const mod = g.modifier||''; g.modifier = null;
+  let dart, hits;
+  if (num==='BULL') { dart=mod==='D'?'BULL':mod==='T'?'T25':'25'; hits=mod==='D'?2:mod==='T'?3:1; }
+  else { dart=mod+num; hits=mod==='T'?3:mod==='D'?2:1; }
+  g.currentDarts.push(dart);
+
+  const p = g.players[g.currentPlayerIndex];
+  const tgt = num==='BULL'?'BULL':num;
+  if (CRICKET_NUMS.includes(tgt)) {
+    const prev = p.marks[tgt];
+    const close = Math.min(hits, Math.max(0, 3-prev));
+    const extra = hits - close;
+    p.marks[tgt] = Math.min(3, prev+hits);
+    if (g.cricketMode==='american' && extra>0) {
+      const othersOpen = g.players.some(pl=>pl!==p && pl.marks[tgt]<3);
+      if (othersOpen) {
+        const pts = tgt==='BULL' ? 25*extra : tgt*extra;
+        p.points += pts;
+        p.cPts[tgt] = (p.cPts[tgt]||0)+pts;
+      }
+    }
+    if (checkCricketWin(p)) { g.gameOver=true; g.winner=p; g.endTime=Date.now(); endGame(); return; }
+  }
+  if (g.currentDarts.length>=3) setTimeout(()=>cricketNext(),400);
+  else render();
+}
+
+function checkCricketWin(p) {
+  const g = S.game;
+  if (!CRICKET_NUMS.every(n=>p.marks[n]>=3)) return false;
+  if (g.cricketMode==='standard') return true;
+  const maxOther = Math.max(...g.players.filter(pl=>pl!==p).map(pl=>pl.points));
+  return p.points >= maxOther;
+}
+
+function cricketMiss() {
+  const g = S.game;
+  if (g.currentDarts.length>=3) return;
+  g.modifier=null; g.currentDarts.push('MISS');
+  if (g.currentDarts.length>=3) setTimeout(()=>cricketNext(),400); else render();
+}
+
+function cricketUndo() {
+  const g = S.game;
+  if (!g.currentDarts.length) return;
+  const last = g.currentDarts.pop();
+  const p = g.players[g.currentPlayerIndex];
+  if (last && last!=='MISS') {
+    const mod = last.startsWith('T')?3:last.startsWith('D')?2:1;
+    const numStr = last.replace(/^[TDB]/,'');
+    const n = numStr==='25'||last==='BULL'?'BULL':parseInt(numStr);
+    if (CRICKET_NUMS.includes(n)) p.marks[n]=Math.max(0,p.marks[n]-mod);
+  }
+  g.modifier=null; render();
+}
+
+function cricketNext() {
+  const g = S.game;
+  g.players[g.currentPlayerIndex].history.push({ darts:[...g.currentDarts] });
+  g.currentDarts=[]; g.modifier=null;
+  g.currentPlayerIndex = (g.currentPlayerIndex+1)%g.players.length;
+  render();
+}
+
+// ==================== AROUND THE CLOCK ====================
+function renderATC() {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  const darts = g.currentDarts;
+  const div = el('div','screen'); div.style.cssText='display:flex;flex-direction:column;height:100%;overflow:hidden;';
+
+  const pBar = g.players.map((pl,i)=>`
+    <div style="flex-shrink:0;text-align:center;min-width:58px;">
+      <div style="font-size:11px;color:${i===g.currentPlayerIndex?'var(--accent)':'var(--muted)'};">${esc(pl.name)}</div>
+      <div style="font-family:var(--fd);font-size:20px;color:${i===g.currentPlayerIndex?'var(--accent)':'var(--text)'};">${pl.target>20?'✓':pl.target}</div>
+    </div>`).join('');
+
+  const chips=[0,1,2].map(i=>{const d=darts[i];return `<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;}).join('');
+  let nums='';
+  for(let n=1;n<=20;n++) {
+    const isTarget=n===p.target;
+    nums+=`<button class="num-btn" style="${isTarget?'border-color:var(--accent);color:var(--accent);background:rgba(0,232,122,0.1);':''}" onclick="atcDart(${n})">${n}</button>`;
+  }
+  nums+=`<button class="num-btn bull-btn" onclick="atcDart('BULL')">BULL</button>`;
+  nums+=`<button class="num-btn next-btn" onclick="atcNext()">SEURAAVA ›</button>`;
+  const modT=g.modifier==='T', modD=g.modifier==='D';
+
+  div.innerHTML = `
+    <div class="game-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
+        <div style="font-size:12px;color:var(--muted);">AROUND THE CLOCK</div>
+      </div>
+      <div style="display:flex;gap:6px;padding:6px 12px;overflow-x:auto;border-top:1px solid var(--border);">${pBar}</div>
+    </div>
+    <div style="padding:14px;text-align:center;flex-shrink:0;">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:3px;margin-bottom:4px;">${esc(p.name)} – OSU NUMERO</div>
+      <div style="font-family:var(--fd);font-size:100px;line-height:1;color:var(--accent);text-shadow:0 0 40px rgba(0,232,122,0.4);">${p.target<=20?p.target:'🎯'}</div>
+    </div>
+    <div class="darts-thrown">${chips}</div>
+    <div class="input-area">
+      <div class="modifier-row">
+        <button class="mod-btn ${modT?'active-T':''}" onclick="toggleMod('T')">TRIPLE</button>
+        <button class="mod-btn ${modD?'active-D':''}" onclick="toggleMod('D')">DOUBLE</button>
+        <button class="mod-btn miss-btn" onclick="atcMiss()">HUTI</button>
+        <button class="mod-btn undo-btn" onclick="atcUndo()">↩</button>
+      </div>
+      <div class="number-grid">${nums}</div>
+    </div>
+  `;
+  return div;
+}
+
+function atcDart(num) {
+  const g = S.game;
+  if (g.currentDarts.length>=3||g.gameOver) return;
+  const mod=g.modifier||''; g.modifier=null;
+  const dart = num==='BULL'?(mod==='D'?'BULL':'25'):mod+num;
+  g.currentDarts.push(dart);
+  const p = g.players[g.currentPlayerIndex];
+  const hit = parseInt(num);
+  if (hit===p.target || (num==='BULL'&&p.target===21)) {
+    p.target++;
+    if (p.target>20) { g.gameOver=true;g.winner=p;g.endTime=Date.now();endGame();return; }
+    showToast(`✓ ${hit} osui! → ${p.target}`, 'success');
+  }
+  if (g.currentDarts.length>=3) setTimeout(()=>atcNext(),400); else render();
+}
+function atcMiss() { const g=S.game; if(g.currentDarts.length>=3)return;g.modifier=null;g.currentDarts.push('MISS');if(g.currentDarts.length>=3)setTimeout(()=>atcNext(),400);else render();}
+function atcUndo() { const g=S.game;if(!g.currentDarts.length)return;g.currentDarts.pop();g.modifier=null;render();}
+function atcNext() { const g=S.game;g.players[g.currentPlayerIndex].history.push({darts:[...g.currentDarts]});g.currentDarts=[];g.modifier=null;g.currentPlayerIndex=(g.currentPlayerIndex+1)%g.players.length;render();}
+
+// ==================== SHANGHAI ====================
+function renderShanghai() {
+  const g = S.game;
+  const p = g.players[g.currentPlayerIndex];
+  const tgt = g.round;
+  const darts = g.currentDarts;
+  const div = el('div','screen'); div.style.cssText='display:flex;flex-direction:column;height:100%;overflow:hidden;';
+
+  const playerRows = g.players.map((pl,i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid ${i===g.currentPlayerIndex?'var(--accent)':'var(--border)'};border-radius:10px;padding:11px 14px;margin-bottom:5px;">
+      <div>
+        <div style="font-size:13px;color:${i===g.currentPlayerIndex?'var(--accent)':'var(--text)'};">${i===g.currentPlayerIndex?'▶ ':''}${esc(pl.name)}</div>
+        <div style="font-size:11px;color:var(--muted);">${pl.history.map(h=>h.roundScore||0).join(' · ')||'–'}</div>
+      </div>
+      <div style="font-family:var(--fd);font-size:28px;">${pl.score}</div>
+    </div>`).join('');
+
+  const chips=[0,1,2].map(i=>{const d=darts[i];return`<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;}).join('');
+  let nums='';
+  for(let n=1;n<=20;n++){const isT=n===tgt;nums+=`<button class="num-btn" style="${isT?'border-color:var(--accent);color:var(--accent);background:rgba(0,232,122,0.1);':''}" onclick="shanghaiDart(${n})">${n}</button>`;}
+  nums+=`<button class="num-btn bull-btn" onclick="shanghaiDart('BULL')">BULL</button>`;
+  nums+=`<button class="num-btn next-btn" onclick="shanghaiNext()">SEURAAVA ›</button>`;
+  const modT=g.modifier==='T', modD=g.modifier==='D';
+
+  div.innerHTML = `
+    <div class="game-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
+        <div style="font-size:12px;color:var(--muted);">SHANGHAI · Kierros ${g.round}/${g.maxRounds}</div>
+      </div>
+    </div>
+    <div style="padding:10px 16px;text-align:center;flex-shrink:0;">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:3px;">TAVOITENUMERO</div>
+      <div style="font-family:var(--fd);font-size:80px;color:var(--accent);line-height:1;">${tgt}</div>
+      <div style="font-size:11px;color:var(--muted);">🎯 Shanghai (S+D+T samalla vuorolla) = välitön voitto!</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:0 10px;">${playerRows}</div>
+    <div style="padding:8px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
+      <div class="darts-thrown" style="padding:3px 0 7px;">${chips}</div>
+      <div class="modifier-row" style="margin-bottom:7px;">
+        <button class="mod-btn ${modT?'active-T':''}" onclick="toggleMod('T')">TRIPLE</button>
+        <button class="mod-btn ${modD?'active-D':''}" onclick="toggleMod('D')">DOUBLE</button>
+        <button class="mod-btn miss-btn" onclick="shanghaiMiss()">HUTI</button>
+        <button class="mod-btn undo-btn" onclick="shanghaiUndo()">↩</button>
+      </div>
+      <div class="number-grid">${nums}</div>
+    </div>
+  `;
+  return div;
+}
+
+function shanghaiDart(num) {
+  const g=S.game; if(g.currentDarts.length>=3||g.gameOver)return;
+  const mod=g.modifier||'';g.modifier=null;
+  const dart=num==='BULL'?(mod==='D'?'BULL':mod==='T'?'T25':'25'):mod+num;
+  g.currentDarts.push(dart);
+  const p=g.players[g.currentPlayerIndex];
+  const tgt=g.round;
+  if(parseInt(num)===tgt){
+    const hits=mod==='T'?3:mod==='D'?2:1;
+    p.score+=tgt*hits;
+    // Check Shanghai
+    const ds=g.currentDarts;
+    const hasS=ds.some(d=>d===String(tgt));
+    const hasD=ds.some(d=>d==='D'+tgt);
+    const hasT=ds.some(d=>d==='T'+tgt);
+    if(hasS&&hasD&&hasT){showToast('🎯 SHANGHAI! Välitön voitto!','success');g.gameOver=true;g.winner=p;g.endTime=Date.now();endGame();return;}
+  }
+  if(g.currentDarts.length>=3)setTimeout(()=>shanghaiNext(),400);else render();
+}
+function shanghaiMiss(){const g=S.game;if(g.currentDarts.length>=3)return;g.modifier=null;g.currentDarts.push('MISS');if(g.currentDarts.length>=3)setTimeout(()=>shanghaiNext(),400);else render();}
+function shanghaiUndo(){const g=S.game;if(!g.currentDarts.length)return;const last=g.currentDarts.pop();const mod=last.startsWith('T')?3:last.startsWith('D')?2:1;const n=parseInt(last.replace(/^[TDB]/,'').replace('BULL','0'));if(n===g.round)g.players[g.currentPlayerIndex].score-=g.round*mod;g.modifier=null;render();}
+function shanghaiNext(){
+  const g=S.game; const p=g.players[g.currentPlayerIndex];
+  const rs=g.currentDarts.reduce((s,d)=>{const mod=d.startsWith('T')?3:d.startsWith('D')?2:1;const n=parseInt(d.replace(/^[TDB]/,'').replace('BULL','0'));return s+(n===g.round?g.round*mod:0);},0);
+  p.history.push({darts:[...g.currentDarts],roundScore:rs});
+  g.currentDarts=[];g.modifier=null;
+  const nxt=(g.currentPlayerIndex+1)%g.players.length;
+  if(nxt===0){
+    if(g.round>=g.maxRounds){const mx=Math.max(...g.players.map(pl=>pl.score));const w=g.players.find(pl=>pl.score===mx);g.gameOver=true;g.winner=w;g.endTime=Date.now();endGame();return;}
+    g.round++;
+  }
+  g.currentPlayerIndex=nxt; render();
+}
+
+// ==================== HALVE-IT ====================
+function renderHalveIt() {
+  const g=S.game; const p=g.players[g.currentPlayerIndex];
+  const tgt=g.targets[g.roundIndex]; const darts=g.currentDarts;
+  const div=el('div','screen'); div.style.cssText='display:flex;flex-direction:column;height:100%;overflow:hidden;';
+
+  const pRows=g.players.map((pl,i)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid ${i===g.currentPlayerIndex?'var(--accent)':'var(--border)'};border-radius:10px;padding:11px 14px;margin-bottom:5px;">
+      <div style="font-size:13px;color:${i===g.currentPlayerIndex?'var(--accent)':'var(--text)'};">${i===g.currentPlayerIndex?'▶ ':''}${esc(pl.name)}</div>
+      <div style="font-family:var(--fd);font-size:28px;">${pl.score}</div>
+    </div>`).join('');
+
+  const chips=[0,1,2].map(i=>{const d=darts[i];return`<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;}).join('');
+  let nums='';
+  for(let n=1;n<=20;n++)nums+=`<button class="num-btn" onclick="halveitDart(${n})">${n}</button>`;
+  nums+=`<button class="num-btn bull-btn" onclick="halveitDart('BULL')">BULL<br><small style="font-family:var(--fu);font-size:10px;">25/50</small></button>`;
+  nums+=`<button class="num-btn next-btn" onclick="halveitNext()">SEURAAVA ›</button>`;
+  const modT=g.modifier==='T', modD=g.modifier==='D';
+  const remRounds=g.targets.length-g.roundIndex-1;
+
+  div.innerHTML = `
+    <div class="game-header">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
+        <div style="font-size:12px;color:var(--muted);">HALVE-IT · Kierros ${g.roundIndex+1}/${g.targets.length}</div>
+      </div>
+    </div>
+    <div style="padding:10px 16px;text-align:center;flex-shrink:0;">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:3px;margin-bottom:2px;">TAVOITE</div>
+      <div style="font-family:var(--fd);font-size:64px;color:var(--accent);line-height:1;">${tgt}</div>
+      <div style="font-size:11px;color:var(--red);margin-top:3px;">Huti → pisteet puolittuvat!</div>
+      ${remRounds>0?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">Seuraavat: ${g.targets.slice(g.roundIndex+1).join(' · ')}</div>`:''}
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:0 10px;">${pRows}</div>
+    <div style="padding:8px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
+      <div class="darts-thrown" style="padding:3px 0 7px;">${chips}</div>
+      <div class="modifier-row" style="margin-bottom:7px;">
+        <button class="mod-btn ${modT?'active-T':''}" onclick="toggleMod('T')">TRIPLE</button>
+        <button class="mod-btn ${modD?'active-D':''}" onclick="toggleMod('D')">DOUBLE</button>
+        <button class="mod-btn miss-btn" onclick="halveitMiss()">HUTI</button>
+        <button class="mod-btn undo-btn" onclick="halveitUndo()">↩</button>
+      </div>
+      <div class="number-grid">${nums}</div>
+    </div>
+  `;
+  return div;
+}
+
+function halveitScore(dart, tgt) {
+  const mod=dart.startsWith('T')?3:dart.startsWith('D')?2:1;
+  const numStr=dart.replace(/^[TDB]/,'');
+  const num=parseInt(numStr);
+  if(tgt==='D-BULL'&&dart==='BULL') return 50;
+  if(tgt==='BULL'&&dart==='25') return 25;
+  if(typeof tgt==='string'&&tgt.startsWith('D')&&dart.startsWith('D')&&parseInt(tgt.slice(1))===num) return num*2;
+  if(typeof tgt==='string'&&tgt.startsWith('T')&&dart.startsWith('T')&&parseInt(tgt.slice(1))===num) return num*3;
+  if(typeof tgt==='number'&&!dart.startsWith('T')&&!dart.startsWith('D')&&num===tgt) return tgt;
+  return 0;
+}
+
+function halveitDart(num){
+  const g=S.game;if(g.currentDarts.length>=3||g.gameOver)return;
+  const mod=g.modifier||'';g.modifier=null;
+  const dart=num==='BULL'?(mod==='D'?'BULL':mod==='T'?'T25':'25'):mod+num;
+  g.currentDarts.push(dart);
+  const p=g.players[g.currentPlayerIndex];
+  const sc=halveitScore(dart,g.targets[g.roundIndex]);
+  p.turnPts=(p.turnPts||0)+sc;
+  if(g.currentDarts.length>=3)setTimeout(()=>halveitNext(),400);else render();
+}
+function halveitMiss(){const g=S.game;if(g.currentDarts.length>=3)return;g.modifier=null;g.currentDarts.push('MISS');if(g.currentDarts.length>=3)setTimeout(()=>halveitNext(),400);else render();}
+function halveitUndo(){const g=S.game;if(!g.currentDarts.length)return;const last=g.currentDarts.pop();const p=g.players[g.currentPlayerIndex];p.turnPts=Math.max(0,(p.turnPts||0)-halveitScore(last,g.targets[g.roundIndex]));g.modifier=null;render();}
+function halveitNext(){
+  const g=S.game;const p=g.players[g.currentPlayerIndex];
+  const sc=p.turnPts||0;
+  if(sc===0){p.score=Math.floor(p.score/2);showToast(`${p.name}: Huti! Puolittui → ${p.score}`,'error');}
+  else{p.score+=sc;}
+  p.turnPts=0;
+  p.history.push({darts:[...g.currentDarts],scored:sc});
+  g.currentDarts=[];g.modifier=null;
+  const nxt=(g.currentPlayerIndex+1)%g.players.length;
+  if(nxt===0){
+    if(g.roundIndex>=g.targets.length-1){const mx=Math.max(...g.players.map(pl=>pl.score));const w=g.players.find(pl=>pl.score===mx);g.gameOver=true;g.winner=w;g.endTime=Date.now();endGame();return;}
+    g.roundIndex++;
+  }
+  g.currentPlayerIndex=nxt;render();
+}
+
+// ==================== GAME OVER ====================
+function endGame() {
+  const g=S.game;
+  const dur=g.endTime?Math.round((g.endTime-g.startTime)/1000):0;
+  fbSaveGame({
+    type:g.type,
+    winner:g.winner?{id:g.winner.id,name:g.winner.name}:null,
+    players:g.players.map(p=>({id:p.id,name:p.name})),
+    checkoutMode:g.checkoutMode||null,
+    cricketMode:g.cricketMode||null,
+    startScore:g.startScore||null,
+    duration:dur,
+  });
+  if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w)w.wins=(w.wins||0)+1;}
+  g.players.forEach(gp=>{const p=S.players.find(p=>p.id===gp.id);if(p)p.games=(p.games||0)+1;});
+  savePlayers();
+  nav('gameover');
+}
+
+function renderGameOver() {
+  const g=S.game;
+  const w=g?.winner;
+  const gName=GAMES.find(t=>t.id===g?.type)?.name||g?.type||'?';
+  const dur=g?.endTime?fmtDuration(Math.round((g.endTime-g.startTime)/1000)):'';
+  const div=el('div','screen');
+  div.innerHTML=`
+    <div class="gameover-screen">
+      <div class="trophy">🏆</div>
+      <div class="winner-label">Voittaja</div>
+      <div class="winner-name">${esc(w?.name||'?')}</div>
+      <div style="margin-top:20px;font-size:13px;color:var(--muted);">${gName} ${dur?'· '+dur:''}</div>
+      ${g?.players?`
+        <div style="margin-top:20px;width:100%;max-width:300px;">
+          ${g.players.map(p=>`
+            <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px;">
+              <span style="color:${p.id===w?.id?'var(--gold)':'var(--text)'};">${p.id===w?.id?'🏆 ':''}${esc(p.name)}</span>
+              ${['501','301','701','custom_x01'].includes(g.type)?`<span style="color:var(--muted);">${p.score} jäljellä</span>`:''}
+            </div>`).join('')}
+        </div>`:''}
+      <div style="margin-top:28px;display:flex;flex-direction:column;gap:10px;width:100%;max-width:300px;">
+        <button class="btn large" onclick="startNew()">🎯 Uusi peli</button>
+        <button class="btn large secondary" onclick="nav('home')">🏠 Etusivu</button>
+      </div>
+    </div>
+  `;
+  return div;
+}
+
+function quitGame() { if(confirm('Lopeta peli kesken?'))nav('home'); }
+
+// ==================== HISTORY ====================
+async function goHistory() {
+  nav('history');
+  initFirebase();
+  const h=await fbLoadHistory();
+  S.history=h; S.historyLoaded=true;
+  render();
+}
+
+function renderHistory() {
+  const div=el('div','screen');
+  let content;
+  if(!S.historyLoaded){content=`<div class="loader">⏳ Ladataan...</div>`;}
+  else if(!S.history.length){content=`<div class="empty-state"><span class="ei">📋</span><p>Ei tallennettuja pelejä vielä.<br>Aloita ensimmäinen peli!</p></div>`;}
+  else{
+    content=`<div class="history-list">`+S.history.map(g=>`
+      <div class="history-card">
+        <div class="history-card-header">
+          <div class="h-type">${GAMES.find(t=>t.id===g.type)?.name||g.type||'?'}</div>
+          <div class="h-date">${fmtDate(g.createdAt)}</div>
+        </div>
+        ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:''}
+        <div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>
+        ${g.duration?`<div style="font-size:11px;color:var(--muted);margin-top:3px;">⏱ ${fmtDuration(g.duration)}</div>`:''}
+      </div>`).join('')+`</div>`;
+  }
+  div.innerHTML=`
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Historia</div>
+    </div>
+    ${content}
+  `;
+  return div;
+}
+
+// ==================== STATS ====================
+async function goStats() {
+  nav('stats');
+  initFirebase();
+  const h=await fbLoadHistory();
+  const st={};
+  h.forEach(g=>{
+    if(!g.players)return;
+    g.players.forEach(p=>{
+      if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{}};
+      st[p.id].games++;
+      st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
+    });
+    if(g.winner){
+      if(!st[g.winner.id])st[g.winner.id]={name:g.winner.name,games:0,wins:0,types:{}};
+      st[g.winner.id].wins++;
+    }
+  });
+  S.stats=st; S.statsLoaded=true;
+  render();
+}
+
+function renderStats() {
+  const div=el('div','screen');
+  let content;
+  if(!S.statsLoaded){content=`<div class="loader">⏳ Ladataan...</div>`;}
+  else if(!Object.keys(S.stats).length){content=`<div class="empty-state"><span class="ei">📊</span><p>Ei tilastoja vielä.</p></div>`;}
+  else{
+    const cards=Object.values(S.stats).sort((a,b)=>b.wins-a.wins).map(s=>`
+      <div class="stat-card">
+        <div class="stat-name">${esc(s.name)}</div>
+        <div class="stat-row"><span>Pelattu</span><span class="stat-val">${s.games}</span></div>
+        <div class="stat-row"><span>Voitot</span><span class="stat-val">${s.wins}</span></div>
+        <div class="stat-row"><span>Voitto%</span><span class="stat-val">${s.games>0?Math.round(s.wins/s.games*100):0}%</span></div>
+        <div class="stat-row"><span>Suosikkipeli</span><span class="stat-val">${Object.entries(s.types).sort((a,b)=>b[1]-a[1])[0]?.[0]||'–'}</span></div>
+      </div>`).join('');
+    content=`<div class="stats-grid">${cards}</div>`;
+  }
+  div.innerHTML=`
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Tilastot</div>
+    </div>
+    ${content}
+  `;
+  return div;
+}
+
+
+// ==================== SETTINGS ====================
+function renderSettings() {
+  const div=el('div','screen');
+  div.innerHTML=`
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Firebase Tiedot</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-desc">
+        ✅ Firebase on konfiguroitu automaattisesti.<br><br>
+        <strong>Projekti:</strong> hakemuspaivakirja<br>
+        <strong>Tietokanta:</strong> Firestore<br>
+        <strong>Kokoelma:</strong> darts_games
+      </div>
+      <button class="btn large" onclick="testFb()">Testaa yhteys</button>
+      <div id="fb-status" style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center;"></div>
+    </div>
+  `;
+  return div;
+}
+
+function saveFbCfg() { testFb(); }
+
+function testFb() {
+  const st=document.getElementById('fb-status');
+  if(!st)return;
+  if(db){st.textContent='✓ Firebase yhdistetty! Projekti: hakemuspaivakirja';st.style.color='var(--accent)';}
+  else{initFirebase();st.textContent=db?'✓ Yhdistetty!':'Yhdistys epäonnistui';st.style.color=db?'var(--accent)':'var(--red)';}
+}
+
+// ==================== HELPERS ====================
+function el(tag,cls){ const d=document.createElement(tag); if(cls)d.className=cls; return d; }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ==================== INIT ====================
+initFirebase();
+render();
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(() => console.log('SW ok'))
+      .catch(e => console.warn('SW fail:', e));
+  });
+}
+</script>
+</body>
+</html>
