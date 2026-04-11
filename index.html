@@ -509,8 +509,8 @@ function renderHome() {
       <button class="menu-btn" onclick="goStats()">
         <span class="icon">&#128202;</span><span class="label">Tilastot</span><span class="arrow">›</span>
       </button>
-      <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.3);display:none;">
-        <span class="icon">&#8635;</span><span class="label" id="update-label">Päivitys saatavilla</span><span class="arrow" style="color:var(--blue);">›</span>
+      <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
+        <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
       </button>
     </div>
   `;
@@ -646,7 +646,7 @@ function renderSetupConfig() {
       <div class="config-section">
         <div class="config-label">Erät (Legs)</div>
         <div class="option-row">
-          ${[1,2,3,5,7].map(n=>`<button class="option-btn ${config.legs===n?'selected':''}" onclick="setCfg('legs',${n});render()">${n===1?'1 (ei eriä)':n+' erää'}</button>`).join('')}
+          ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button class="option-btn ${config.legs===n?'selected':''}" onclick="setCfg('legs',${n});render()">${n===1?'1 (ei eriä)':n+' erää'}</button>`).join('')}
         </div>
         <div style="margin-top:8px;font-size:12px;color:var(--muted);">Eniten eriä voittanut pelaaja voittaa pelin.</div>
       </div>`;
