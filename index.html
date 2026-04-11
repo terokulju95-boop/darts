@@ -306,14 +306,22 @@ async function fbSaveGame(data) {
   if (!db) { showToast('Firebase ei konfiguroitu', 'error'); return; }
   try {
     await db.collection('darts_games').add({ ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    showToast('Peli tallennettu ✓', 'success');
+    showToast('Peli tallennettu ✓', 'success'); invalidateHistoryCache();
+    // Auto-delete oldest games if over 400
+    const all = await db.collection('darts_games').orderBy('createdAt','desc').get();
+    if(all.docs.length > 400) {
+      const toDelete = all.docs.slice(400);
+      const batch = db.batch();
+      toDelete.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
   } catch(e) { showToast('Tallennus epäonnistui', 'error'); console.error(e); }
 }
 
 async function fbLoadHistory() {
   if (!db) return [];
   try {
-    const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(60).get();
+    const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(400).get();
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch(e) { console.error(e); return []; }
 }
@@ -323,7 +331,7 @@ async function deleteGame(id) {
   if (!db) return;
   try {
     await db.collection('darts_games').doc(id).delete();
-    S.history = S.history.filter(g => g.id !== id);
+    S.history = S.history.filter(g => g.id !== id); invalidateHistoryCache();
     render();
     showToast('Peli poistettu', 'success');
   } catch(e) { showToast('Poisto epäonnistui','error'); }
@@ -337,7 +345,7 @@ async function deleteAllGames() {
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
     await batch.commit();
-    S.history = [];
+    S.history = []; invalidateHistoryCache();
     render();
     showToast('Kaikki pelit poistettu', 'success');
   } catch(e) { showToast('Poisto epäonnistui','error'); }
@@ -396,6 +404,13 @@ async function fbUpdatePlayerProfile(id, wins, games, gs) {
     // Load current player data to compare records
     const doc = await db.collection('darts_players').doc(id).get();
     const cur = doc.exists ? doc.data() : {};
+    // Merge heatmap cumulatively
+    const curHm = cur.heatmap || {};
+    const newHm = gs.heatmap || {};
+    const mergedHm = {};
+    const hmKeys = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,'BULL','MISS'];
+    hmKeys.forEach(k=>{ mergedHm[k]=(curHm[k]||0)+(newHm[k]||0); });
+
     const update = {
       wins, games,
       totalTurns: (cur.totalTurns||0) + (gs.turns||0),
@@ -404,15 +419,14 @@ async function fbUpdatePlayerProfile(id, wins, games, gs) {
       total100plus: (cur.total100plus||0) + (gs.s100plus||0),
       bestTurn: Math.max(cur.bestTurn||0, gs.best||0),
       bestCheckout: Math.max(cur.bestCheckout||0, gs.checkout||0),
-      // Running average: weighted
       allTimeAvg: (() => {
-        const prevTurns = cur.totalTurns||0;
         const prevAvgSum = (cur.allTimeAvgSum||0);
         const newSum = prevAvgSum + (gs.avg||0) * (gs.turns||0);
-        const newTurns = prevTurns + (gs.turns||0);
+        const newTurns = (cur.totalTurns||0) + (gs.turns||0);
         return newTurns > 0 ? Math.round(newSum/newTurns*10)/10 : 0;
       })(),
       allTimeAvgSum: (cur.allTimeAvgSum||0) + (gs.avg||0)*(gs.turns||0),
+      heatmap: mergedHm,
     };
     await db.collection('darts_players').doc(id).update(update);
   } catch(e) { console.error('fbUpdatePlayerProfile:', e); }
@@ -831,7 +845,9 @@ function startGame() {
     S.game = { ...base,
       startScore:start, checkoutMode:config.checkoutMode||'double',
       legs, legsToWin:legs,
-      players: players.map(p => ({ id:p.id, name:p.name, score:start, history:[], legsWon:0 })),
+      players: players.map(p => ({ id:p.id, name:p.name, score:start, history:[], legsWon:0,
+        heatmap: {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}
+      })),
       turnStartScore: start,
     };
   } else if (gameType === 'cricket') {
@@ -981,6 +997,7 @@ function processX01(dart) {
 
   if (newScore < 0) {
     g.currentDarts.push(dart);
+    trackHeatmap(p, dart);
     showBust(() => {
       p.score = g.turnStartScore;
       p.history.push({ darts:[...g.currentDarts], bust:true });
@@ -1034,9 +1051,22 @@ function processX01(dart) {
   }
 
   g.currentDarts.push(dart);
+  // Track heatmap
+  if(p.heatmap !== undefined) {
+    const numStr = dart.replace(/^[TDB]/,'');
+    const key = dart==='MISS'?'MISS':dart==='BULL'||dart==='25'?'BULL':parseInt(numStr);
+    if(key !== undefined && p.heatmap[key] !== undefined) p.heatmap[key]++;
+  }
   p.score = newScore;
   if (g.currentDarts.length >= 3) setTimeout(()=>x01Next(),300);
   else { const fromVal=g.turnStartScore-g.currentDarts.slice(0,-1).reduce((s,d)=>s+dartValue(d),0); render(); animateScore(fromVal,p.score,g.checkoutMode); }
+}
+
+function trackHeatmap(p, dart) {
+  if(!p.heatmap) return;
+  const numStr = dart.replace(/^[TDB]/,'');
+  const key = dart==='MISS'?'MISS':dart==='BULL'||dart==='25'?'BULL':parseInt(numStr)||0;
+  if(p.heatmap[key]!==undefined) p.heatmap[key]++;
 }
 
 // ==================== CHECKOUT FINDER ====================
@@ -1582,7 +1612,8 @@ function endGame() {
         const lastTurn = allTurns[allTurns.length-1];
         if(!lastTurn.bust) checkout = lastTurn.scored||0;
       }
-      gamePlayerStats[pl.id] = { avg, best, busts, turns:allTurns.length, s180, s100plus, checkout };
+      const heatmap = pl.heatmap || {};
+      gamePlayerStats[pl.id] = { avg, best, busts, turns:allTurns.length, s180, s100plus, checkout, heatmap };
     });
   }
 
@@ -1661,10 +1692,19 @@ function quitGame() { if(confirm('Lopeta peli kesken?')){ localStorage.removeIte
 // ==================== HISTORY ====================
 async function goHistory() {
   nav('history');
+  // Use cached if available and fresh (< 5 min old)
+  const now = Date.now();
+  if(S.historyLoaded && S.historyCachedAt && (now-S.historyCachedAt)<300000) {
+    render(); return;
+  }
   initFirebase();
   const h=await fbLoadHistory();
-  S.history=h; S.historyLoaded=true;
+  S.history=h; S.historyLoaded=true; S.historyCachedAt=now;
   render();
+}
+
+function invalidateHistoryCache() {
+  S.historyLoaded=false; S.historyCachedAt=null;
 }
 
 function renderHistory() {
@@ -1763,6 +1803,10 @@ function hexToRgb(hex) {
 // ==================== STATS ====================
 async function goStats() {
   nav('stats');
+  const now = Date.now();
+  if(S.statsLoaded && S.statsCachedAt && (now-S.statsCachedAt)<300000) {
+    render(); return;
+  }
   initFirebase();
   const h=await fbLoadHistory();
   const st={};
@@ -1795,7 +1839,7 @@ async function goStats() {
   });
   // Reverse last10 so newest is last (for chart left-to-right)
   Object.values(st).forEach(s=>s.last10.reverse());
-  S.stats=st; S.statsLoaded=true;
+  S.stats=st; S.statsLoaded=true; S.statsCachedAt=Date.now();
   render();
 }
 
@@ -2068,7 +2112,7 @@ async function showPlayerProfile(id) {
   if(db) {
     try {
       // Load recent games and filter for this player client-side
-      const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(60).get();
+      const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(400).get();
       const all = snap.docs.map(d=>({id:d.id,...d.data()}));
       p._games = all.filter(g=>(g.players||[]).some(pl=>pl.id===p.id));
     } catch(e) { p._games = []; }
@@ -2170,6 +2214,46 @@ function renderPlayerProfile() {
           <div class="gstat-row"><span>Busteja yhteensä</span><span class="gstat-val">${p.totalBusts||0}</span></div>
           <div class="gstat-row"><span>Suosikkipeli</span><span class="gstat-val">${(()=>{const t={};games.forEach(g=>{t[g.type]=(t[g.type]||0)+1;});const e=Object.entries(t).sort((a,b)=>b[1]-a[1])[0];return e?GAMES.find(x=>x.id===e[0])?.name||e[0]:'–';})()}</span></div>
         </div>
+
+        ${(()=>{
+          const hm = p.heatmap;
+          if(!hm) return '';
+          const nums = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+          const allVals = nums.map(n=>hm[n]||0);
+          const maxVal = Math.max(1,...allVals);
+          const totalDarts = allVals.reduce((a,b)=>a+b,0)+(hm.BULL||0);
+          const topNums = [...nums].sort((a,b)=>(hm[b]||0)-(hm[a]||0)).slice(0,3);
+          return `<div class="stat-card" style="border-left:3px solid var(--accent);margin-bottom:12px;">
+            <div class="gstat-title">🎯 Lämpökartta</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">${totalDarts} tikkaa seurattu · Suosikit: ${topNums.map(n=>'<span style="color:var(--accent);">'+n+'</span>').join(', ')}</div>
+            <div style="display:grid;grid-template-columns:repeat(10,1fr);gap:3px;margin-bottom:6px;">
+              ${nums.map(n=>{
+                const v=hm[n]||0;
+                const pct=Math.round(v/maxVal*100);
+                const alpha=0.15+pct/100*0.85;
+                const isTop=topNums.includes(n);
+                return '<div style="text-align:center;">'
+                  +'<div style="background:rgba('+hexToRgb(col.bg)+','+alpha+');border-radius:4px;height:28px;display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:13px;color:'+(isTop?'#fff':'rgba(255,255,255,0.7)')+';border:'+(isTop?'1px solid '+col.bg:'1px solid transparent')+';">'+n+'</div>'
+                  +'<div style="font-size:9px;color:var(--muted);margin-top:1px;">'+v+'</div>'
+                  +'</div>';
+              }).join('')}
+            </div>
+            <div style="display:flex;gap:8px;">
+              <div style="text-align:center;background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:8px;padding:6px 12px;flex:1;">
+                <div style="font-family:var(--fd);font-size:20px;color:var(--gold);">${hm.BULL||0}</div>
+                <div style="font-size:10px;color:var(--muted);">BULL</div>
+              </div>
+              <div style="text-align:center;background:rgba(255,51,85,0.1);border:1px solid rgba(255,51,85,0.3);border-radius:8px;padding:6px 12px;flex:1;">
+                <div style="font-family:var(--fd);font-size:20px;color:var(--red);">${hm.MISS||0}</div>
+                <div style="font-size:10px;color:var(--muted);">HUTI</div>
+              </div>
+              <div style="text-align:center;background:rgba(0,232,122,0.1);border:1px solid rgba(0,232,122,0.3);border-radius:8px;padding:6px 12px;flex:1;">
+                <div style="font-family:var(--fd);font-size:20px;color:var(--accent);">${totalDarts>0?Math.round((allVals.reduce((a,b)=>a+b,0)+hm.BULL||0)/totalDarts*100)+'%':'–'}</div>
+                <div style="font-size:10px;color:var(--muted);">Osuma%</div>
+              </div>
+            </div>
+          </div>`;
+        })()}
 
         ${oppList.length ? `<div class="stat-card" style="border-left:3px solid var(--gold);margin-bottom:12px;">
           <div class="gstat-title">Vastustajat</div>
