@@ -43,7 +43,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
   padding:12px 16px; display:flex; align-items:center; gap:12px;
   flex-shrink:0; position:sticky; top:0; z-index:10;
 }
-.header-title { font-family:var(--fd); font-size:22px; letter-spacing:1px; color:var(--accent); flex:1; }
+.header-title { font-family:var(--fd); font-size:26px; letter-spacing:1px; color:var(--accent); flex:1; }
 .back-btn {
   background:var(--card); border:1px solid var(--border); color:var(--text);
   padding:8px 14px; border-radius:8px; font-family:var(--fu); font-size:14px; font-weight:600; cursor:pointer;
@@ -58,7 +58,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .home-menu { padding:16px; display:flex; flex-direction:column; gap:10px; }
 .menu-btn {
   background:var(--card); border:1px solid var(--border); color:var(--text);
-  padding:18px 20px; border-radius:12px; font-family:var(--fu); font-size:17px; font-weight:600; letter-spacing:1px;
+  padding:20px 20px; border-radius:12px; font-family:var(--fu); font-size:20px; font-weight:600; letter-spacing:1px;
   cursor:pointer; text-align:left; display:flex; align-items:center; gap:12px; transition:all 0.12s;
 }
 .menu-btn:active { transform:scale(0.97); }
@@ -81,8 +81,8 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .game-card.featured { border-color:rgba(0,232,122,0.4); }
 .game-icon { font-size:26px; }
 .game-info { flex:1; }
-.game-name { font-family:var(--fd); font-size:22px; letter-spacing:1px; }
-.game-desc { font-size:12px; color:var(--muted); margin-top:2px; }
+.game-name { font-family:var(--fd); font-size:26px; letter-spacing:1px; }
+.game-desc { font-size:14px; color:var(--muted); margin-top:2px; }
 .badge { background:var(--accent); color:#000; font-size:10px; font-weight:700; padding:3px 7px; border-radius:20px; }
 
 /* CONFIG */
@@ -91,7 +91,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .option-row { display:flex; gap:8px; flex-wrap:wrap; }
 .option-btn {
   background:var(--card); border:1px solid var(--border); color:var(--text);
-  padding:10px 14px; border-radius:8px; font-family:var(--fu); font-size:14px; font-weight:600; cursor:pointer;
+  padding:12px 16px; border-radius:8px; font-family:var(--fu); font-size:16px; font-weight:600; cursor:pointer;
 }
 .option-btn.selected { background:var(--accent); border-color:var(--accent); color:#000; }
 
@@ -99,8 +99,8 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .players-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
 .player-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; display:flex; align-items:center; gap:12px; }
 .player-avatar { width:40px; height:40px; border-radius:50%; background:var(--accent2); display:flex; align-items:center; justify-content:center; font-family:var(--fd); font-size:18px; color:#000; flex-shrink:0; }
-.player-name { flex:1; font-size:16px; font-weight:600; }
-.player-stat { font-size:11px; color:var(--muted); }
+.player-name { flex:1; font-size:20px; font-weight:600; }
+.player-stat { font-size:13px; color:var(--muted); }
 .player-del { background:none; border:1px solid var(--red); color:var(--red); padding:6px 10px; border-radius:7px; font-size:12px; cursor:pointer; }
 .add-player-form { padding:14px; display:flex; gap:10px; }
 .text-input {
@@ -137,20 +137,20 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 
 /* GAME SCREEN - X01 */
 .game-header { background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
-.player-tabs { display:flex; overflow-x:auto; scrollbar-width:none; padding:0 6px; gap:2px; }
+.player-tabs { display:flex; overflow-x:auto; scrollbar-width:none; padding:0; gap:2px; }
 .player-tabs::-webkit-scrollbar { display:none; }
 .player-tab { flex-shrink:0; padding:10px 12px; font-family:var(--fu); font-size:13px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; white-space:nowrap; }
 .player-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
 .score-board { padding:12px 16px; text-align:center; flex-shrink:0; }
 .cur-player-name { font-size:12px; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:2px; }
-.cur-score { font-family:var(--fd); font-size:88px; line-height:1; color:var(--text); letter-spacing:-2px; transition:color 0.2s; }
+.cur-score { font-family:var(--fd); font-size:96px; line-height:1; color:var(--text); letter-spacing:-2px; transition:color 0.2s; }
 .cur-score.bust { color:var(--red); }
 .cur-score.win { color:var(--accent); }
-.score-sub { font-size:12px; color:var(--muted); margin-top:3px; min-height:18px; }
+.score-sub { font-size:14px; color:var(--muted); margin-top:3px; min-height:20px; }
 
 .darts-thrown { display:flex; justify-content:center; gap:7px; padding:6px 16px; flex-shrink:0; }
-.dart-chip { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:5px 11px; font-family:var(--fd); font-size:18px; color:var(--text); min-width:52px; text-align:center; }
+.dart-chip { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:7px 13px; font-family:var(--fd); font-size:22px; color:var(--text); min-width:60px; text-align:center; }
 .dart-chip.empty { color:var(--muted); border-style:dashed; }
 .dart-chip.miss { color:var(--muted); }
 .dart-chip.triple { color:var(--accent); border-color:rgba(0,232,122,0.4); }
@@ -161,7 +161,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .modifier-row { display:flex; gap:7px; flex-shrink:0; }
 .mod-btn {
   flex:1; background:var(--card); border:2px solid var(--border); color:var(--text);
-  padding:11px 6px; border-radius:10px; font-family:var(--fd); font-size:18px; letter-spacing:1px;
+  padding:13px 6px; border-radius:10px; font-family:var(--fd); font-size:20px; letter-spacing:1px;
   cursor:pointer; transition:all 0.12s; line-height:1;
 }
 .mod-btn:active { transform:scale(0.93); }
@@ -173,7 +173,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .number-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; flex:1; min-height:0; }
 .num-btn {
   background:var(--card2); border:1px solid var(--border); color:var(--text);
-  border-radius:10px; font-family:var(--fd); font-size:22px; cursor:pointer;
+  border-radius:10px; font-family:var(--fd); font-size:26px; cursor:pointer;
   transition:all 0.08s; display:flex; align-items:center; justify-content:center; line-height:1;
 }
 .num-btn:active { transform:scale(0.88); background:var(--card); }
@@ -203,16 +203,16 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .history-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
 .history-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
 .history-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
-.h-type { font-family:var(--fd); font-size:20px; color:var(--accent); }
-.h-date { font-size:11px; color:var(--muted); }
-.h-winner { font-size:13px; color:var(--gold); }
-.h-players { font-size:12px; color:var(--muted); margin-top:3px; }
+.h-type { font-family:var(--fd); font-size:24px; color:var(--accent); }
+.h-date { font-size:13px; color:var(--muted); }
+.h-winner { font-size:15px; color:var(--gold); }
+.h-players { font-size:14px; color:var(--muted); margin-top:3px; }
 
 /* STATS */
 .stats-grid { padding:14px; display:flex; flex-direction:column; gap:11px; }
 .stat-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:15px; }
-.stat-name { font-family:var(--fd); font-size:22px; margin-bottom:11px; }
-.stat-row { display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-bottom:1px solid var(--border); }
+.stat-name { font-family:var(--fd); font-size:26px; margin-bottom:11px; }
+.stat-row { display:flex; justify-content:space-between; font-size:16px; padding:7px 0; border-bottom:1px solid var(--border); }
 .stat-row:last-child { border:none; }
 .stat-val { color:var(--accent); font-weight:600; }
 
@@ -311,7 +311,8 @@ async function deleteAllGames() {
 // ==================== STATE ====================
 let S = {
   screen: 'home',
-  players: JSON.parse(localStorage.getItem('darts_players') || '[]'),
+  players: [],
+  playersLoaded: false,
   setup: { gameType: null, config: {}, selected: [] },
   game: null,
   history: [],
@@ -320,7 +321,38 @@ let S = {
   statsLoaded: false,
 };
 
-function savePlayers() { localStorage.setItem('darts_players', JSON.stringify(S.players)); }
+// Players stored in Firebase (not localStorage) so they persist across browser data clears
+async function loadPlayers() {
+  if (!db) return;
+  try {
+    const snap = await db.collection('darts_players').orderBy('name').get();
+    S.players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    S.playersLoaded = true;
+  } catch(e) { console.error('loadPlayers:', e); S.players = []; }
+}
+
+async function savePlayers() {
+  // No-op: players are saved individually via addPlayer/delPlayer
+}
+
+async function fbAddPlayer(p) {
+  if (!db) return p;
+  try {
+    const ref = await db.collection('darts_players').add({ name: p.name, wins: 0, games: 0, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    return { ...p, id: ref.id };
+  } catch(e) { console.error(e); return p; }
+}
+
+async function fbDeletePlayer(id) {
+  if (!db) return;
+  try { await db.collection('darts_players').doc(id).delete(); } catch(e) { console.error(e); }
+}
+
+async function fbUpdatePlayerStats(id, wins, games) {
+  if (!db) return;
+  try { await db.collection('darts_players').doc(id).update({ wins, games }); } catch(e) { console.error(e); }
+}
+
 function genId() { return Math.random().toString(36).slice(2,10); }
 
 // ==================== GAME DEFINITIONS ====================
@@ -330,9 +362,6 @@ const GAMES = [
   { id:'701',        name:'701',              icon:'🎯', desc:'Pidempi versio tiukoille pelaajille.' },
   { id:'cricket',    name:'Cricket',          icon:'🏏', desc:'Avaa numerot 15–20 + Bull. Pisteet American-moodissa.', hot:true },
   { id:'atc',        name:'Around the Clock', icon:'🕐', desc:'Osu numerot 1–20 järjestyksessä. Ensimmäinen läpi voittaa.' },
-  { id:'shanghai',   name:'Shanghai',         icon:'🀄', desc:'7 kierrosta kohdenumeroilla. Shanghai = välitön voitto!' },
-  { id:'halveit',    name:'Halve-It',         icon:'✂️', desc:'Tavoitteet per kierros. Huti puolittaa pisteesi.' },
-  { id:'killer',     name:'Killer',           icon:'💀', desc:'Jokainen saa oman numeron. Tapa muut! (tulossa)' },
   { id:'custom_x01', name:'Oma X01',          icon:'⚙️', desc:'Aseta aloituspisteet itse haluamallesi lukumäärälle.' },
 ];
 
@@ -485,21 +514,21 @@ function renderPlayers() {
   return div;
 }
 
-function addPlayer() {
+async function addPlayer() {
   const input = document.getElementById('np');
   const name = input.value.trim();
   if (!name) return;
   if (S.players.find(p => p.name.toLowerCase() === name.toLowerCase())) { showToast('Pelaaja on jo listassa','error'); return; }
-  const p = { id:genId(), name, wins:0, games:0 };
+  let p = { id:genId(), name, wins:0, games:0 };
+  p = await fbAddPlayer(p);
   S.players.push(p);
-  savePlayers();
   nav('players');
 }
 
-function delPlayer(id) {
+async function delPlayer(id) {
   if (!confirm('Poistetaanko pelaaja?')) return;
+  await fbDeletePlayer(id);
   S.players = S.players.filter(p => p.id !== id);
-  savePlayers();
   nav('players');
 }
 
@@ -687,6 +716,7 @@ function startGame() {
   } else if (gameType === 'halveit') {
     S.game = { ...base, roundIndex:0, targets:HALVEIT_TARGETS, players: players.map(p => ({ id:p.id, name:p.name, score:0, turnPts:0, history:[] })) };
   }
+  localStorage.setItem('darts_game', JSON.stringify(S.game));
   nav('game');
 }
 
@@ -694,10 +724,10 @@ function startGame() {
 function renderGame() {
   const g = S.game;
   if (!g) return renderHome();
+  // Persist game state so it survives page refresh/app switch
+  try { localStorage.setItem('darts_game', JSON.stringify(g)); } catch(e) {}
   if (g.type === 'cricket') return renderCricket();
   if (g.type === 'atc') return renderATC();
-  if (g.type === 'shanghai') return renderShanghai();
-  if (g.type === 'halveit') return renderHalveIt();
   return renderX01();
 }
 
@@ -711,10 +741,17 @@ function renderX01() {
   const gName = GAMES.find(x=>x.id===g.type)?.name || g.type.toUpperCase();
   const coName = g.checkoutMode==='double'?'Double Out':g.checkoutMode==='single'?'Single Out':g.checkoutMode==='master'?'Master Out':'Vapaa';
 
-  const tabs = g.players.map((pl,i) =>
-    `<div class="player-tab ${i===g.currentPlayerIndex?'active':''}">
-      ${esc(pl.name)}: <strong style="font-family:var(--fd);font-size:16px;">${pl.score}</strong>
-    </div>`).join('');
+  const tabs = g.players.map((pl,i) => {
+    const isActive = i === g.currentPlayerIndex;
+    return `<div class="player-tab ${isActive?'active':''}" style="
+      flex:1; text-align:center; padding:10px 8px;
+      background:${isActive?'rgba(0,232,122,0.12)':'rgba(255,255,255,0.03)'};
+      border-bottom:3px solid ${isActive?'var(--accent)':'rgba(255,255,255,0.1)'};
+      min-width:80px; transition:all 0.15s; border-radius:${isActive?'0':'0'};">
+      <div style="font-family:var(--fd);font-size:${isActive?'18':'15'}px;color:${isActive?'var(--accent)':'#9090c0'};letter-spacing:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pl.name).toUpperCase()}</div>
+      <div style="font-family:var(--fd);font-size:${isActive?'32':'26'}px;color:${isActive?'#ffffff':'#7070a0'};line-height:1.1;">${pl.score}</div>
+    </div>`;
+  }).join('');
 
   const chips = [0,1,2].map(i => {
     const d = darts[i];
@@ -963,7 +1000,7 @@ function renderCricket() {
     </div>` : '';
 
   const chips = [0,1,2].map(i=>{const d=darts[i];return `<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;}).join('');
-  const numBtns = CRICKET_NUMS.map(n=>`<button class="cricket-num-btn ${n==='BULL'?'bull':''}" onclick="cricketDart(${n==='BULL'?'"BULL"':n})">${n}</button>`).join('');
+  const numBtns = CRICKET_NUMS.map(n=>`<button class="cricket-num-btn ${n==='BULL'?'bull':''}" data-num="${n}" onclick="cricketDartBtn(this)">${n}</button>`).join('');
   const modT=g.modifier==='T', modD=g.modifier==='D';
 
   div.innerHTML = `
@@ -993,6 +1030,12 @@ function renderCricket() {
     </div>
   `;
   return div;
+}
+
+function cricketDartBtn(el) {
+  const raw = el.getAttribute('data-num');
+  const num = raw === 'BULL' ? 'BULL' : parseInt(raw);
+  cricketDart(num);
 }
 
 function cricketDart(num) {
@@ -1316,9 +1359,9 @@ function endGame() {
     startScore:g.startScore||null,
     duration:dur,
   });
-  if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w)w.wins=(w.wins||0)+1;}
-  g.players.forEach(gp=>{const p=S.players.find(p=>p.id===gp.id);if(p)p.games=(p.games||0)+1;});
-  savePlayers();
+  if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
+  g.players.forEach(gp=>{const p=S.players.find(p=>p.id===gp.id);if(p){p.games=(p.games||0)+1;fbUpdatePlayerStats(p.id,p.wins,p.games);}});
+  localStorage.removeItem('darts_game');
   nav('gameover');
 }
 
@@ -1351,7 +1394,7 @@ function renderGameOver() {
   return div;
 }
 
-function quitGame() { if(confirm('Lopeta peli kesken?'))nav('home'); }
+function quitGame() { if(confirm('Lopeta peli kesken?')){ localStorage.removeItem('darts_game'); S.game=null; nav('home'); } }
 
 // ==================== HISTORY ====================
 async function goHistory() {
@@ -1480,8 +1523,21 @@ function el(tag,cls){ const d=document.createElement(tag); if(cls)d.className=cl
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ==================== INIT ====================
-initFirebase();
-render();
+async function init() {
+  initFirebase();
+  // Restore in-progress game
+  try {
+    const saved = localStorage.getItem('darts_game');
+    if (saved) {
+      S.game = JSON.parse(saved);
+      S.screen = 'game';
+    }
+  } catch(e) { localStorage.removeItem('darts_game'); }
+  // Load players from Firebase
+  await loadPlayers();
+  render();
+}
+window.addEventListener("load", init);
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -1491,6 +1547,30 @@ if ('serviceWorker' in navigator) {
       .catch(e => console.log('SW error:', e));
   });
 }
+</script>
+
+<script>
+// Swipe right = go back
+(function() {
+  let sx = 0, sy = 0;
+  document.addEventListener('touchstart', e => {
+    sx = e.changedTouches[0].screenX;
+    sy = e.changedTouches[0].screenY;
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].screenX - sx;
+    const dy = Math.abs(e.changedTouches[0].screenY - sy);
+    if (dx > 80 && dy < 60) {
+      const backMap = {
+        players: 'home', 'setup-type': 'home', 'setup-config': 'setup-type',
+        'setup-players': 'setup-config', history: 'home', stats: 'home',
+        gameover: 'home'
+      };
+      const target = backMap[S.screen];
+      if (target) nav(target);
+    }
+  }, { passive: true });
+})();
 </script>
 </body>
 </html>
