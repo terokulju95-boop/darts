@@ -57,9 +57,11 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .home-logo p { color:var(--muted); font-size:12px; letter-spacing:3px; text-transform:uppercase; margin-top:4px; }
 .home-menu { padding:16px; display:flex; flex-direction:column; gap:10px; }
 .menu-btn {
-  background:var(--card); border:1px solid var(--border); color:var(--text);
+  background:rgba(22,22,34,0.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  border:1px solid rgba(255,255,255,0.08); color:var(--text);
   padding:20px 20px; border-radius:12px; font-family:var(--fu); font-size:20px; font-weight:600; letter-spacing:1px;
   cursor:pointer; text-align:left; display:flex; align-items:center; gap:12px; transition:all 0.12s;
+  box-shadow:0 4px 20px rgba(0,0,0,0.3);
 }
 .menu-btn:active { transform:scale(0.97); }
 .menu-btn.primary {
@@ -74,8 +76,10 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 /* GAME TYPE LIST */
 .game-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
 .game-card {
-  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  background:rgba(22,22,34,0.7); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,0.07); border-radius:12px;
   padding:14px 16px; cursor:pointer; transition:all 0.12s; display:flex; align-items:center; gap:14px;
+  box-shadow:0 4px 20px rgba(0,0,0,0.25);
 }
 .game-card:active { transform:scale(0.97); background:var(--card2); }
 .game-card.featured { border-color:rgba(0,232,122,0.4); }
@@ -97,7 +101,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 
 /* PLAYERS */
 .players-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
-.player-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; display:flex; align-items:center; gap:12px; }
+.player-card { background:rgba(22,22,34,0.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:13px 15px; display:flex; align-items:center; gap:12px; box-shadow:0 4px 24px rgba(0,0,0,0.3); }
 .player-avatar { width:40px; height:40px; border-radius:50%; background:var(--accent2); display:flex; align-items:center; justify-content:center; font-family:var(--fd); font-size:18px; color:#000; flex-shrink:0; }
 .player-name { flex:1; font-size:20px; font-weight:600; }
 .player-stat { font-size:13px; color:var(--muted); }
@@ -144,7 +148,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 
 .score-board { padding:12px 16px; text-align:center; flex-shrink:0; }
 .cur-player-name { font-size:12px; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:2px; }
-.cur-score { font-family:var(--fd); font-size:96px; line-height:1; color:var(--text); letter-spacing:-2px; transition:color 0.2s; }
+.cur-score { font-family:var(--fd); font-size:96px; line-height:1; color:var(--text); letter-spacing:-2px; transition:color 0.5s ease; }
 .cur-score.bust { color:var(--red); }
 .cur-score.win { color:var(--accent); }
 .score-sub { font-size:14px; color:var(--muted); margin-top:3px; min-height:20px; }
@@ -201,7 +205,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 
 /* HISTORY */
 .history-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
-.history-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+.history-card { background:rgba(22,22,34,0.75); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:13px 15px; box-shadow:0 4px 20px rgba(0,0,0,0.25); }
 .history-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
 .h-type { font-family:var(--fd); font-size:24px; color:var(--accent); }
 .h-date { font-size:13px; color:var(--muted); }
@@ -210,7 +214,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 
 /* STATS */
 .stats-grid { padding:14px; display:flex; flex-direction:column; gap:11px; }
-.stat-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:15px; }
+.stat-card { background:rgba(22,22,34,0.75); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.07); border-radius:12px; padding:15px; box-shadow:0 4px 20px rgba(0,0,0,0.25); }
 .stat-name { font-family:var(--fd); font-size:26px; margin-bottom:11px; }
 .stat-row { display:flex; justify-content:space-between; font-size:16px; padding:7px 0; border-bottom:1px solid var(--border); }
 .stat-row:last-child { border:none; }
@@ -271,7 +275,8 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 </style>
 </head>
 <body>
-<div id="app"></div>
+<canvas id="bg-canvas" style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;opacity:0.55;"></canvas>
+<div id="app" style="position:relative;z-index:1;"></div>
 <div id="toast" class="toast"></div>
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
@@ -502,9 +507,11 @@ function renderHome() {
         <span class="icon">📋</span><span class="label">Historia</span><span class="arrow">›</span>
       </button>
       <button class="menu-btn" onclick="goStats()">
-        <span class="icon">📊</span><span class="label">Tilastot</span><span class="arrow">›</span>
+        <span class="icon">&#128202;</span><span class="label">Tilastot</span><span class="arrow">›</span>
       </button>
-
+      <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.3);display:none;">
+        <span class="icon">&#8635;</span><span class="label" id="update-label">Päivitys saatavilla</span><span class="arrow" style="color:var(--blue);">›</span>
+      </button>
     </div>
   `;
   return div;
@@ -590,7 +597,7 @@ function selectType(id) {
   const isX01 = ['501','301','701','custom_x01'].includes(id);
   if (isX01) {
     const start = id==='301'?301:id==='701'?701:501;
-    S.setup.config = { startScore: start, checkoutMode:'double' };
+    S.setup.config = { startScore: start, checkoutMode:'double', legs:1 };
   } else if (id === 'cricket') {
     S.setup.config = { cricketMode:'american' };
   } else {
@@ -635,6 +642,13 @@ function renderSetupConfig() {
           <b style="color:var(--text)">Master Out</b> – lopetus tuplalla tai triplalla<br>
           <b style="color:var(--text)">Vapaa</b> – ei rajoituksia
         </div>
+      </div>
+      <div class="config-section">
+        <div class="config-label">Erät (Legs)</div>
+        <div class="option-row">
+          ${[1,2,3,5,7].map(n=>`<button class="option-btn ${config.legs===n?'selected':''}" onclick="setCfg('legs',${n});render()">${n===1?'1 (ei eriä)':n+' erää'}</button>`).join('')}
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--muted);">Eniten eriä voittanut pelaaja voittaa pelin.</div>
       </div>`;
   } else if (gameType === 'cricket') {
     const cm = config.cricketMode;
@@ -728,9 +742,11 @@ function startGame() {
   const isX01 = ['501','301','701','custom_x01'].includes(gameType);
   if (isX01) {
     const start = config.startScore;
+    const legs = config.legs||1;
     S.game = { ...base,
       startScore:start, checkoutMode:config.checkoutMode||'double',
-      players: players.map(p => ({ id:p.id, name:p.name, score:start, history:[] })),
+      legs, legsToWin:legs,
+      players: players.map(p => ({ id:p.id, name:p.name, score:start, history:[], legsWon:0 })),
       turnStartScore: start,
     };
   } else if (gameType === 'cricket') {
@@ -770,6 +786,7 @@ function renderX01() {
 
   const gName = GAMES.find(x=>x.id===g.type)?.name || g.type.toUpperCase();
   const coName = g.checkoutMode==='double'?'Double Out':g.checkoutMode==='single'?'Single Out':g.checkoutMode==='master'?'Master Out':'Vapaa';
+  const legsStr = g.legsToWin>1?' · Best of '+g.legsToWin:'';
 
   const tabs = g.players.map((pl,i) => {
     const isActive = i === g.currentPlayerIndex;
@@ -780,6 +797,7 @@ function renderX01() {
       min-width:80px; transition:all 0.15s;">
       <div style="font-family:var(--fd);font-size:${isActive?'18':'15'}px;color:${isActive?'var(--accent)':'#9090c0'};letter-spacing:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pl.name).toUpperCase()}</div>
       <div style="font-family:var(--fd);font-size:${isActive?'32':'26'}px;color:${isActive?'#ffffff':'#7070a0'};line-height:1.1;">${pl.score}</div>
+      ${g.legsToWin>1?`<div style="font-size:11px;color:${isActive?'var(--accent)':'var(--muted)'};">${'●'.repeat(pl.legsWon||0)}${'&#9900;'.repeat(Math.max(0,(g.legsToWin||1)-(pl.legsWon||0)))} erät</div>`:''}
     </div>`;
   }).join('');
 
@@ -810,7 +828,7 @@ function renderX01() {
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px 4px;">
         <button class="back-btn" style="font-size:12px;padding:6px 10px;" onclick="quitGame()">✕ Lopeta</button>
-        <div style="font-size:12px;color:var(--muted);">${gName} · ${coName}</div>
+        <div style="font-size:12px;color:var(--muted);">${gName} · ${coName}${g.legsToWin>1?" · Best of "+g.legsToWin:""}</div>
       </div>
       <div class="player-tabs">${tabs}</div>
     </div>
@@ -890,9 +908,21 @@ function processX01(dart) {
     }
     g.currentDarts.push(dart);
     p.score = 0;
-    g.gameOver = true; g.winner = p; g.endTime = Date.now();
     p.history.push({ darts:[...g.currentDarts] });
-    endGame();
+    p.legsWon = (p.legsWon||0)+1;
+    // Check if player has won enough legs
+    if(p.legsWon >= (g.legsToWin||1)) {
+      g.gameOver = true; g.winner = p; g.endTime = Date.now();
+      endGame();
+    } else {
+      // Start new leg
+      showToast(p.name+' voitti erän! '+p.legsWon+'/'+(g.legsToWin||1), 'success');
+      g.currentDarts=[]; g.modifier=null;
+      g.players.forEach(pl=>{ pl.score=g.startScore; pl.history=[]; });
+      g.currentPlayerIndex=(g.currentPlayerIndex+1)%g.players.length;
+      g.turnStartScore=g.startScore;
+      render();
+    }
     return;
   }
 
@@ -911,7 +941,7 @@ function processX01(dart) {
   g.currentDarts.push(dart);
   p.score = newScore;
   if (g.currentDarts.length >= 3) setTimeout(()=>x01Next(),300);
-  else { render(); animateScore(); }
+  else { const fromVal=g.turnStartScore-g.currentDarts.slice(0,-1).reduce((s,d)=>s+dartValue(d),0); render(); animateScore(fromVal,p.score,g.checkoutMode); }
 }
 
 // ==================== CHECKOUT FINDER ====================
@@ -1579,8 +1609,30 @@ function testFb() {
 }
 
 // ==================== HELPERS ====================
-function animateScore() {
-  requestAnimationFrame(() => { const sc=document.getElementById('cscore'); if(!sc)return; sc.classList.remove('score-drop'); void sc.offsetWidth; sc.classList.add('score-drop'); });
+function animateScore(fromVal, toVal, mode) {
+  const sc = document.getElementById('cscore');
+  if(!sc) return;
+  // Rolling animation
+  const duration = 320;
+  const start = performance.now();
+  const diff = fromVal - toVal;
+  function tick(now) {
+    const t = Math.min(1,(now-start)/duration);
+    const ease = 1-Math.pow(1-t,3);
+    const cur = Math.round(fromVal - diff*ease);
+    sc.textContent = cur;
+    // Color temperature based on remaining
+    if(mode==='double'||mode==='master') {
+      if(toVal<=170&&toVal>=2) {
+        if(toVal<=40) sc.style.color='var(--accent)';
+        else if(toVal<=100) sc.style.color='#ffd700';
+        else sc.style.color='var(--text)';
+      } else sc.style.color='var(--text)';
+    }
+    if(t<1) requestAnimationFrame(tick);
+    else { sc.textContent=toVal; sc.classList.remove('score-drop'); void sc.offsetWidth; sc.classList.add('score-drop'); }
+  }
+  requestAnimationFrame(tick);
 }
 function launchConfetti() {
   const cols=['#00e87a','#ffd700','#ff3355','#4488ff','#fff','#ff9900'];
@@ -1637,6 +1689,129 @@ if ('serviceWorker' in navigator) {
       if (target) nav(target);
     }
   }, { passive: true });
+})();
+</script>
+<script>
+// ======= BACKGROUND: dartboard ghost + floating particles =======
+(function(){
+  const canvas = document.getElementById('bg-canvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  let W, H, particles = [];
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Board position - right side, partially visible
+  const BX = () => W * 0.82;
+  const BY = () => H * 0.40;
+  const BR = () => Math.min(W, H) * 0.38;
+
+  // Dartboard colors (ghost, very low alpha)
+  const ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+
+  function drawBoard() {
+    const bx=BX(), by=BY(), br=BR();
+    ctx.save();
+    // Overall fade
+    ctx.globalAlpha = 0.13;
+
+    // Segments
+    for(let i=0;i<20;i++){
+      const a1 = (i*18-99)*Math.PI/180;
+      const a2 = ((i+1)*18-99)*Math.PI/180;
+      const even = i%2===0;
+      // doubles
+      ctx.beginPath(); ctx.moveTo(bx,by);
+      ctx.arc(bx,by,br*0.955,a1,a2);
+      ctx.arc(bx,by,br*0.855,a2,a1,true);
+      ctx.closePath();
+      ctx.fillStyle = even?'#cc0022':'#009933'; ctx.fill();
+      // large score
+      ctx.beginPath(); ctx.moveTo(bx,by);
+      ctx.arc(bx,by,br*0.855,a1,a2);
+      ctx.arc(bx,by,br*0.54,a2,a1,true);
+      ctx.closePath();
+      ctx.fillStyle = even?'#111':'#ccc'; ctx.fill();
+      // triples
+      ctx.beginPath(); ctx.moveTo(bx,by);
+      ctx.arc(bx,by,br*0.54,a1,a2);
+      ctx.arc(bx,by,br*0.47,a2,a1,true);
+      ctx.closePath();
+      ctx.fillStyle = even?'#cc0022':'#009933'; ctx.fill();
+      // inner score
+      ctx.beginPath(); ctx.moveTo(bx,by);
+      ctx.arc(bx,by,br*0.47,a1,a2);
+      ctx.arc(bx,by,br*0.162,a2,a1,true);
+      ctx.closePath();
+      ctx.fillStyle = even?'#111':'#ccc'; ctx.fill();
+    }
+    // bull outer
+    ctx.beginPath(); ctx.arc(bx,by,br*0.162,0,Math.PI*2);
+    ctx.fillStyle='#009933'; ctx.fill();
+    // bullseye
+    ctx.beginPath(); ctx.arc(bx,by,br*0.08,0,Math.PI*2);
+    ctx.fillStyle='#cc0022'; ctx.fill();
+    // wire rings
+    ctx.globalAlpha=0.08;
+    [0.162,0.47,0.54,0.855,0.955].forEach(r=>{
+      ctx.beginPath(); ctx.arc(bx,by,br*r,0,Math.PI*2);
+      ctx.strokeStyle='#aaa'; ctx.lineWidth=1.5; ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  // Slow pulse animation on board
+  let pulse = 0;
+
+  // Particles
+  function mkParticle() {
+    return {
+      x: Math.random()*W, y: Math.random()*H,
+      vx: (Math.random()-0.5)*0.3,
+      vy: -0.2-Math.random()*0.4,
+      r: 1+Math.random()*2,
+      alpha: 0.05+Math.random()*0.12,
+      life: 0, maxLife: 200+Math.random()*300,
+      color: Math.random()>0.7?'#00e87a':'#ffffff'
+    };
+  }
+  for(let i=0;i<40;i++) { const p=mkParticle(); p.life=Math.random()*p.maxLife; particles.push(p); }
+
+  function drawParticles() {
+    particles.forEach(p => {
+      const fade = Math.sin(p.life/p.maxLife*Math.PI);
+      ctx.save();
+      ctx.globalAlpha = p.alpha * fade;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+      ctx.restore();
+      p.x += p.vx; p.y += p.vy; p.life++;
+      if(p.life >= p.maxLife) { Object.assign(p, mkParticle()); p.life=0; }
+    });
+  }
+
+  function frame() {
+    ctx.clearRect(0,0,W,H);
+    pulse += 0.008;
+    // Subtle pulsing glow behind board
+    const bx=BX(),by=BY(),br=BR();
+    const grd = ctx.createRadialGradient(bx,by,br*0.3,bx,by,br*1.1);
+    const gAlpha = 0.04+Math.sin(pulse)*0.015;
+    grd.addColorStop(0,`rgba(0,232,122,${gAlpha})`);
+    grd.addColorStop(1,'rgba(0,232,122,0)');
+    ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+    drawBoard();
+    drawParticles();
+    requestAnimationFrame(frame);
+  }
+  frame();
 })();
 </script>
 </body>
