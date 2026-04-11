@@ -853,7 +853,13 @@ function renderX01() {
 
   const chips = [0,1,2].map(i => {
     const d = darts[i];
-    return `<div class="dart-chip ${d?dartClass(d):'empty'}">${d||'—'}</div>`;
+    const clickable = d && g.editMode;
+    return `<div class="dart-chip ${d?dartClass(d):'empty'}"
+      style="${clickable?'cursor:pointer;opacity:0.8;border-style:dashed;':''}"
+      onclick="${clickable?'x01RemoveDart('+i+')':''}"
+      title="${clickable?'Klikkaa poistaaksesi':''}">
+      ${d||'—'}${clickable?'<span style="font-size:9px;display:block;color:var(--muted);">✕</span>':''}
+    </div>`;
   }).join('');
 
   const modT = g.modifier==='T', modD = g.modifier==='D';
@@ -864,6 +870,7 @@ function renderX01() {
 
   const subLabel = g.modifier
     ? `<span style="color:${modT?'var(--accent)':'var(--blue)'}">[ ${g.modifier} aktiivinen ]</span>`
+    : g.editMode ? `<span style="color:var(--gold)">✏️ MUOKKAUSTILA – tallenna Seuraava</span>`
     : 'pistettä jäljellä';
 
   const dartsLeft = 3 - g.currentDarts.length;
@@ -888,6 +895,9 @@ function renderX01() {
       <div class="score-sub">${subLabel}</div>
     </div>
     ${coHtml}
+    ${g.editMode?`<div style="background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:8px;margin:0 16px 4px;padding:7px 14px;text-align:center;font-size:13px;color:var(--gold);flex-shrink:0;">
+      ✏️ Muokkaa heittoja alla · Paina <b>Seuraava</b> tallentaaksesi
+    </div>`:''}
     <div class="darts-thrown">${chips}</div>
     <div class="input-area">
       <div class="modifier-row">
@@ -1051,15 +1061,48 @@ function x01Undo() {
   render();
 }
 
+function x01RemoveDart(idx) {
+  const g = S.game;
+  if (!g.editMode) return;
+  g.currentDarts.splice(idx, 1);
+  const p = g.players[g.currentPlayerIndex];
+  p.score = g.turnStartScore - g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
+  render();
+}
+
 function x01UndoTurn() {
   const g=S.game; const p=g.players[g.currentPlayerIndex];
-  if(g.currentDarts.length>0){g.currentDarts=[];p.score=g.turnStartScore;g.modifier=null;render();return;}
+  // If darts thrown this turn, clear them and stay on same player
+  if(g.currentDarts.length>0){
+    g.currentDarts=[]; p.score=g.turnStartScore; g.modifier=null;
+    g.editMode=false; render(); return;
+  }
+  // Go back to previous player and RESTORE their darts for editing
   const pi=(g.currentPlayerIndex-1+g.players.length)%g.players.length;
   const prev=g.players[pi];
   if(!prev.history||!prev.history.length){showToast('Ei peruutettavaa','error');return;}
   const last=prev.history.pop();
-  if(!last.bust)prev.score=(prev.score||0)+(last.scored||0);
-  g.currentPlayerIndex=pi;g.turnStartScore=prev.score;g.currentDarts=[];g.modifier=null;render();
+  // Restore score to what it was BEFORE their turn
+  if(last.bust) {
+    // On bust, score was already reset to turnStart, so current score IS already correct
+    // turnStartScore = prev.score (already reset)
+  } else {
+    // Add back what they scored
+    prev.score=(prev.score||0)+(last.scored||0);
+  }
+  // turnStartScore = score before any darts were thrown
+  const turnStart = prev.score;
+  // Restore darts (skip if bust since those darts caused a bust)
+  g.currentPlayerIndex=pi;
+  g.turnStartScore=turnStart;
+  g.currentDarts=last.bust?[]:[...(last.darts||[])];
+  // Recalculate current score with any restored non-bust darts
+  const thrown=g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
+  prev.score=turnStart-thrown;
+  g.modifier=null;
+  g.editMode=true;
+  showToast('Muokkaa '+prev.name+'n heittoja','success');
+  render();
 }
 
 function x01Next() {
@@ -1069,7 +1112,7 @@ function x01Next() {
     const sc = g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
     p.history.push({ darts:[...g.currentDarts], scored:sc });
   }
-  g.currentDarts = []; g.modifier = null;
+  g.currentDarts = []; g.modifier = null; g.editMode = false;
   advanceX01();
 }
 
@@ -1077,6 +1120,7 @@ function advanceX01() {
   const g = S.game;
   g.currentPlayerIndex = (g.currentPlayerIndex+1) % g.players.length;
   g.turnStartScore = g.players[g.currentPlayerIndex].score;
+  g.editMode = false;
   render();
 }
 
