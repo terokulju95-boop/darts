@@ -102,7 +102,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 /* PLAYERS */
 .players-list { padding:14px; display:flex; flex-direction:column; gap:9px; }
 .player-card { background:rgba(22,22,34,0.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.08); border-radius:12px; padding:13px 15px; display:flex; align-items:center; gap:12px; box-shadow:0 4px 24px rgba(0,0,0,0.3); }
-.player-avatar { width:40px; height:40px; border-radius:50%; background:var(--accent2); display:flex; align-items:center; justify-content:center; font-family:var(--fd); font-size:18px; color:#000; flex-shrink:0; }
+.player-avatar { width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:var(--fd); font-size:20px; flex-shrink:0; font-weight:700; }
 .player-name { flex:1; font-size:20px; font-weight:600; }
 .player-stat { font-size:13px; color:var(--muted); }
 .player-del { background:none; border:1px solid var(--red); color:var(--red); padding:6px 10px; border-radius:7px; font-size:12px; cursor:pointer; }
@@ -354,6 +354,8 @@ let S = {
   historyLoaded: false,
   stats: {},
   statsLoaded: false,
+  tournament: null,
+  detailGame: null,
 };
 
 // Players stored in Firebase (not localStorage) so they persist across browser data clears
@@ -391,6 +393,23 @@ async function fbUpdatePlayerStats(id, wins, games) {
 function genId() { return Math.random().toString(36).slice(2,10); }
 
 // ==================== GAME DEFINITIONS ====================
+
+const PLAYER_COLORS = [
+  {bg:'#00e87a',text:'#003d1f',name:'Vihreä'},
+  {bg:'#4488ff',text:'#001433',name:'Sininen'},
+  {bg:'#ff3355',text:'#330010',name:'Punainen'},
+  {bg:'#ffd700',text:'#332b00',name:'Kulta'},
+  {bg:'#ff9900',text:'#331f00',name:'Oranssi'},
+  {bg:'#aa44ff',text:'#1a0033',name:'Violetti'},
+  {bg:'#00ccff',text:'#003344',name:'Syaani'},
+  {bg:'#ff44aa',text:'#330022',name:'Pinkki'},
+];
+function playerColor(idx) { return PLAYER_COLORS[idx % PLAYER_COLORS.length]; }
+function playerBg(idx) { return playerColor(idx).bg; }
+function playerColorForId(players, id) {
+  const idx = players.findIndex(p=>p.id===id);
+  return idx>=0 ? playerColor(idx) : PLAYER_COLORS[0];
+}
 const GAMES = [
   { id:'501',        name:'501',              icon:'🎯', desc:'Suosituin kilpailupeli. Lopeta tuplaan.', hot:true },
   { id:'301',        name:'301',              icon:'🎯', desc:'Nopeampi versio. Sama säännöt kuin 501.', hot:true },
@@ -481,7 +500,7 @@ function render() {
     'setup-type': renderSetupType, 'setup-config': renderSetupConfig,
     'setup-players': renderSetupPlayers,
     game: renderGame, gameover: renderGameOver,
-    history: renderHistory, stats: renderStats, settings: renderSettings,
+    history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
   };
   const fn = fns[S.screen];
   if (fn) { app.innerHTML = ''; app.appendChild(fn()); }
@@ -508,6 +527,9 @@ function renderHome() {
       </button>
       <button class="menu-btn" onclick="goStats()">
         <span class="icon">&#128202;</span><span class="label">Tilastot</span><span class="arrow">›</span>
+      </button>
+      <button class="menu-btn" onclick="nav('tournament-setup')" style="border-color:rgba(255,215,0,0.3);">
+        <span class="icon">&#127942;</span><span class="label">Turnaus</span><span class="arrow" style="color:var(--gold);">›</span>
       </button>
       <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
         <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
@@ -696,16 +718,31 @@ function adjScore(d) {
 }
 
 // ==================== SETUP PLAYERS ====================
+function movePlayer(fromIdx, toIdx) {
+  const sel = S.setup.selected;
+  if(fromIdx<0||toIdx<0||fromIdx>=sel.length||toIdx>=sel.length) return;
+  const [moved] = sel.splice(fromIdx,1);
+  sel.splice(toIdx,0,moved);
+  nav('setup-players');
+}
+
 function renderSetupPlayers() {
   const div = el('div','screen');
   const sel = S.setup.selected;
-  const cards = S.players.map(p => {
+  const cards = S.players.map((p,idx) => {
     const on = sel.includes(p.id);
+    const selIdx = sel.indexOf(p.id);
+    const col = playerColor(selIdx>=0?selIdx:idx);
+    const borderCol = on ? col.bg : 'var(--border)';
     return `
-      <div class="player-select-card ${on?'selected':''}" onclick="toggleSel('${p.id}')">
-        <div class="player-avatar">${p.name[0].toUpperCase()}</div>
+      <div class="player-select-card ${on?'selected':''}" onclick="toggleSel('${p.id}')"
+        style="border-color:${borderCol};${on?'background:'+col.bg+'18;':''}">
+        <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
         <div class="player-name">${esc(p.name)}</div>
-        <div class="checkmark">${on?'✓':''}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${on?`<span style="font-size:12px;color:${col.bg};font-weight:700;">#${selIdx+1}</span>`:''}
+          <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
+        </div>
       </div>`;
   }).join('');
   const ok = sel.length >= 1;
@@ -714,11 +751,22 @@ function renderSetupPlayers() {
       <button class="back-btn" onclick="nav('setup-config')">‹ Takaisin</button>
       <div class="header-title">Pelaajat (${sel.length} valittu)</div>
     </div>
-    <div class="order-hint">Valitse vähintään 1 pelaaja. Vuorojärjestys on listajärjestys.</div>
+    <div class="order-hint">Valitse pelaajat. Järjestys = aloitusjärjestys. Raahaa vaihtaaksesi järjestystä.</div>
     ${S.players.length === 0
       ? `<div class="empty-state"><span class="ei">👤</span><p>Lisää ensin pelaajia.</p></div>
          <div style="padding:14px;"><button class="btn large secondary" onclick="nav('players')">Lisää pelaajia</button></div>`
       : `<div class="player-select-list">${cards}</div>
+         ${sel.length>1?`<div style="padding:6px 14px 2px;">
+           <div class="config-label">Aloitusjärjestys (raahaa tai nuolia)</div>
+           <div id="order-list" style="display:flex;flex-direction:column;gap:6px;padding:8px 0;">
+             ${sel.map((id,i)=>{const p=S.players.find(x=>x.id===id);const col=playerColor(i);return `<div style="display:flex;align-items:center;gap:10px;background:rgba(${col.bg.replace('#','').match(/../g).map(h=>parseInt(h,16)).join(',')},0.12);border:1px solid ${col.bg}44;border-radius:10px;padding:10px 12px;">
+               <div style="width:28px;height:28px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:16px;">${i+1}</div>
+               <div style="flex:1;font-size:16px;font-weight:600;">${esc(p?.name||'?')}</div>
+               <button onclick="movePlayer(${i},${i-1})" style="background:none;border:1px solid var(--border);color:var(--text);width:32px;height:32px;border-radius:8px;font-size:18px;cursor:pointer;${i===0?'opacity:0.2;pointer-events:none;':''}">↑</button>
+               <button onclick="movePlayer(${i},${i+1})" style="background:none;border:1px solid var(--border);color:var(--text);width:32px;height:32px;border-radius:8px;font-size:18px;cursor:pointer;${i===sel.length-1?'opacity:0.2;pointer-events:none;':''}">↓</button>
+             </div>`;}).join('')}
+           </div>
+         </div>`:''}
          <div style="padding:14px;">
            <button class="btn large ${ok?'':'disabled'}" onclick="${ok?'startGame()':'void(0)'}">Aloita peli 🎯</button>
          </div>`}
@@ -790,14 +838,15 @@ function renderX01() {
 
   const tabs = g.players.map((pl,i) => {
     const isActive = i === g.currentPlayerIndex;
-    return `<div class="player-tab ${isActive?'active':''} ${isActive?'tab-active-pulse':''}" style="
+    const col = playerColor(i);
+    return `<div class="player-tab ${isActive?'active':''}" style="
       flex:1; text-align:center; padding:10px 8px;
-      background:${isActive?'rgba(0,232,122,0.12)':'rgba(255,255,255,0.03)'};
-      border-bottom:3px solid ${isActive?'var(--accent)':'rgba(255,255,255,0.1)'};
-      min-width:80px; transition:all 0.15s;">
-      <div style="font-family:var(--fd);font-size:${isActive?'18':'15'}px;color:${isActive?'var(--accent)':'#9090c0'};letter-spacing:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pl.name).toUpperCase()}</div>
-      <div style="font-family:var(--fd);font-size:${isActive?'32':'26'}px;color:${isActive?'#ffffff':'#7070a0'};line-height:1.1;">${pl.score}</div>
-      ${g.legsToWin>1?`<div style="font-size:11px;color:${isActive?'var(--accent)':'var(--muted)'};">${'●'.repeat(pl.legsWon||0)}${'&#9900;'.repeat(Math.max(0,(g.legsToWin||1)-(pl.legsWon||0)))} erät</div>`:''}
+      background:${isActive?col.bg+'22':'rgba(255,255,255,0.02)'};
+      border-bottom:3px solid ${isActive?col.bg:'rgba(255,255,255,0.08)'};
+      min-width:80px; transition:all 0.2s;">
+      <div style="font-family:var(--fd);font-size:${isActive?'17':'14'}px;color:${isActive?col.bg:'#7070a0'};letter-spacing:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pl.name).toUpperCase()}</div>
+      <div style="font-family:var(--fd);font-size:${isActive?'30':'24'}px;color:${isActive?'#fff':'#5a5a8a'};line-height:1.1;">${pl.score}</div>
+      ${g.legsToWin>1?`<div style="font-size:11px;color:${isActive?col.bg:'var(--muted)'};">${'●'.repeat(pl.legsWon||0)}${'○'.repeat(Math.max(0,(g.legsToWin||1)-(pl.legsWon||0)))} erät</div>`:''}
     </div>`;
   }).join('');
 
@@ -833,7 +882,7 @@ function renderX01() {
       <div class="player-tabs">${tabs}</div>
     </div>
     <div class="score-board">
-      <div class="cur-player-name">${esc(p.name)}</div>
+      <div class="cur-player-name" style="color:${playerColor(g.currentPlayerIndex).bg};">${esc(p.name)}</div>
       <div class="cur-score" id="cscore">${p.score}</div>
       <div class="score-sub">${subLabel}</div>
     </div>
@@ -1424,6 +1473,16 @@ function halveitNext(){
 function endGame() {
   const g=S.game;
   const dur=g.endTime?Math.round((g.endTime-g.startTime)/1000):0;
+  // Build turn log for history detail view
+  const turnLog = [];
+  const isX01save = ['501','301','701','custom_x01'].includes(g.type);
+  if(isX01save) {
+    g.players.forEach((pl,pi) => {
+      (pl.history||[]).forEach(turn => {
+        turnLog.push({ player:pl.name, playerIdx:pi, darts:turn.darts||[], scored:turn.scored||0, bust:turn.bust||false, remaining:pl.score });
+      });
+    });
+  }
   fbSaveGame({
     type:g.type,
     winner:g.winner?{id:g.winner.id,name:g.winner.name}:null,
@@ -1432,12 +1491,17 @@ function endGame() {
     cricketMode:g.cricketMode||null,
     startScore:g.startScore||null,
     duration:dur,
+    turnLog: turnLog.slice(0,200),
   });
   if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
   g.players.forEach(gp=>{const p=S.players.find(p=>p.id===gp.id);if(p){p.games=(p.games||0)+1;fbUpdatePlayerStats(p.id,p.wins,p.games);}});
   localStorage.removeItem('darts_game');
-  nav('gameover');
-  setTimeout(launchConfetti,300);
+  if(g.isTournamentMatch && S.tournament && g.winner) {
+    tournamentMatchDone(g.winner.id);
+  } else {
+    nav('gameover');
+    setTimeout(launchConfetti,300);
+  }
 }
 
 function calcTurnStats(g) {
@@ -1500,17 +1564,18 @@ function renderHistory() {
         <button onclick="deleteAllGames()" style="background:none;border:1px solid var(--red);color:var(--red);font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;font-family:var(--fu);font-weight:600;">🗑 Tyhjennä kaikki</button>
       </div>
       <div class="history-list">`+S.history.map(g=>`
-      <div class="history-card">
+      <div class="history-card" onclick="showGameDetail('${g.id}')" style="cursor:pointer;">
         <div class="history-card-header">
           <div class="h-type">${GAMES.find(t=>t.id===g.type)?.name||g.type||'?'}</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <div class="h-date">${fmtDate(g.createdAt)}</div>
-            <button onclick="deleteGame('${g.id}')" style="background:none;border:1px solid var(--red);color:var(--red);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;">✕</button>
+            <button onclick="event.stopPropagation();deleteGame('${g.id}')" style="background:none;border:1px solid var(--red);color:var(--red);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;">✕</button>
           </div>
         </div>
         ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:''}
         <div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>
         ${g.duration?`<div style="font-size:11px;color:var(--muted);margin-top:3px;">⏱ ${fmtDuration(g.duration)}</div>`:''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Klikkaa nähdäksesi tiedot ›</div>
       </div>`).join('')+`</div>`;
   }
   div.innerHTML=`
@@ -1523,24 +1588,87 @@ function renderHistory() {
   return div;
 }
 
+function showGameDetail(id) {
+  const g = S.history.find(x=>x.id===id);
+  if(!g) return;
+  S.detailGame = g;
+  nav('history-detail');
+}
+
+function renderHistoryDetail() {
+  const g = S.detailGame;
+  if(!g) return renderHistory();
+  const div = el('div','screen');
+  const gName = GAMES.find(t=>t.id===g.type)?.name||g.type||'?';
+  const isX01 = ['501','301','701','custom_x01'].includes(g.type);
+
+  // Build turn-by-turn rows from saved turnLog if exists
+  let detailHtml = '';
+  if(g.turnLog && g.turnLog.length) {
+    detailHtml = '<div style="padding:12px 14px;">';
+    let curLeg = 0;
+    g.turnLog.forEach((turn,ti) => {
+      if(turn.leg !== undefined && turn.leg !== curLeg) {
+        curLeg = turn.leg;
+        detailHtml += `<div style="text-align:center;font-family:var(--fd);font-size:18px;color:var(--accent);padding:10px 0 4px;letter-spacing:2px;">— ERÄ ${curLeg+1} —</div>`;
+      }
+      const col = playerColor(turn.playerIdx||0);
+      const scored = turn.scored||0;
+      const bust = turn.bust||false;
+      detailHtml += `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:5px;border-radius:10px;background:rgba(${hexToRgb(col.bg)},0.08);border-left:3px solid ${col.bg};">
+        <div style="font-size:13px;color:${col.bg};min-width:70px;font-weight:700;">${esc(turn.player||'')}</div>
+        <div style="flex:1;font-family:var(--fd);font-size:15px;">${(turn.darts||[]).join(' · ')||'—'}</div>
+        <div style="font-family:var(--fd);font-size:16px;color:${bust?'var(--red)':scored>0?'var(--accent)':'var(--muted)'};">${bust?'BUST':scored>0?'+'+scored:'0'}</div>
+        ${turn.remaining!==undefined?`<div style="font-size:13px;color:var(--muted);min-width:36px;text-align:right;">${turn.remaining}</div>`:''}
+      </div>`;
+    });
+    detailHtml += '</div>';
+  } else {
+    detailHtml = '<div class="empty-state"><span class="ei">📋</span><p>Ei yksityiskohtaisia tietoja.<br>Vanhoissa peleissä ei tallenneta vuorotietoja.</p></div>';
+  }
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('history')">‹ Historia</button>
+      <div class="header-title">${gName}</div>
+    </div>
+    <div style="padding:12px 14px 6px;background:var(--surface);border-bottom:1px solid var(--border);">
+      ${g.winner?`<div style="font-size:16px;color:var(--gold);margin-bottom:4px;">🏆 ${esc(g.winner.name)}</div>`:''}
+      <div style="font-size:13px;color:var(--muted);">${fmtDate(g.createdAt)} ${g.duration?'· '+fmtDuration(g.duration):''}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:2px;">${(g.players||[]).map((p,i)=>'<span style="color:'+playerColor(i).bg+'">'+esc(p.name)+'</span>').join(' vs ')}</div>
+    </div>
+    ${detailHtml}
+  `;
+  return div;
+}
+
+function hexToRgb(hex) {
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return r+','+g+','+b;
+}
+
 // ==================== STATS ====================
 async function goStats() {
   nav('stats');
   initFirebase();
   const h=await fbLoadHistory();
   const st={};
-  h.forEach(g=>{
+  // Process chronologically for streak + trend
+  const chronological = [...h].reverse();
+  chronological.forEach(g=>{
     if(!g.players)return;
     g.players.forEach(p=>{
-      if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{}};
+      if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{},streak:0,maxStreak:0,last10:[]};
       st[p.id].games++;
       st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
+      const won = g.winner?.id===p.id;
+      if(won){ st[p.id].wins++; st[p.id].streak++; st[p.id].maxStreak=Math.max(st[p.id].maxStreak,st[p.id].streak); }
+      else { st[p.id].streak=0; }
+      if(st[p.id].last10.length<10) st[p.id].last10.push(won?1:0);
     });
-    if(g.winner){
-      if(!st[g.winner.id])st[g.winner.id]={name:g.winner.name,games:0,wins:0,types:{}};
-      st[g.winner.id].wins++;
-    }
   });
+  // Reverse last10 so newest is last (for chart left-to-right)
+  Object.values(st).forEach(s=>s.last10.reverse());
   S.stats=st; S.statsLoaded=true;
   render();
 }
@@ -1556,14 +1684,22 @@ function renderStats() {
     const mkBar=(items,val,col,sfx)=>'<div class="bar-container">'+items.map(s=>{const pct=Math.round(val(s)/Math.max(1,...items.map(val))*100);return '<div class="bar-row"><div class="bar-label">'+esc(s.name)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+(typeof col==='function'?col(s):col)+';">'+sfx(s)+'</div></div></div>';}).join('')+'</div>';
     const barWin='<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">Voitto%</div>'+mkBar(sorted,s=>s.games>0?Math.round(s.wins/s.games*100):0,s=>{const p=s.games>0?Math.round(s.wins/s.games*100):0;return p>=60?'var(--accent)':p>=35?'var(--gold)':'var(--muted)';},s=>(s.games>0?Math.round(s.wins/s.games*100):0)+'%')+'</div>';
     const barG='<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">Pelejä pelattu</div>'+mkBar(sorted,s=>s.games,'var(--blue)',s=>s.games)+'</div>';
-    const cards=sorted.map(s=>`
-      <div class="stat-card">
-        <div class="stat-name">${esc(s.name)}</div>
+    const cards=sorted.map((s,si)=>{
+      const col=playerColor(si);
+      const last10bars=s.last10.map(w=>`<div style="flex:1;height:${w?'100%':'40%'};background:${w?col.bg:'var(--border)'};border-radius:3px 3px 0 0;align-self:flex-end;min-height:6px;transition:height 0.4s;"></div>`).join('');
+      const streakEmoji=s.streak>=3?'🔥':s.streak>=2?'✨':'';
+      return `<div class="stat-card" style="border-left:3px solid ${col.bg};">
+        <div class="stat-name" style="color:${col.bg};">${esc(s.name)}</div>
         <div class="stat-row"><span>Pelattu</span><span class="stat-val">${s.games}</span></div>
         <div class="stat-row"><span>Voitot</span><span class="stat-val">${s.wins}</span></div>
         <div class="stat-row"><span>Voitto%</span><span class="stat-val">${s.games>0?Math.round(s.wins/s.games*100):0}%</span></div>
+        <div class="stat-row"><span>Voittoputki</span><span class="stat-val">${s.streak} ${streakEmoji}</span></div>
+        <div class="stat-row"><span>Paras putki</span><span class="stat-val">${s.maxStreak}</span></div>
         <div class="stat-row"><span>Suosikkipeli</span><span class="stat-val">${Object.entries(s.types).sort((a,b)=>b[1]-a[1])[0]?.[0]||'–'}</span></div>
-      </div>`).join('');
+        ${s.last10.length>0?`<div style="margin-top:10px;"><div style="font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:1px;">VIIMEISET ${s.last10.length} PELIÄ</div>
+        <div style="display:flex;gap:3px;height:32px;align-items:flex-end;">${last10bars}</div></div>`:''}
+      </div>`;
+    }).join('');
     content=`<div class="stats-grid">${barWin}${barG}${cards}</div>`;
   }
   div.innerHTML=`
@@ -1607,6 +1743,185 @@ function testFb() {
   if(db){st.textContent='✓ Firebase yhdistetty! Projekti: hakemuspaivakirja';st.style.color='var(--accent)';}
   else{initFirebase();st.textContent=db?'✓ Yhdistetty!':'Yhdistys epäonnistui';st.style.color=db?'var(--accent)':'var(--red)';}
 }
+
+// ==================== TOURNAMENT ====================
+function renderTournamentSetup() {
+  const div=el('div','screen');
+  const sel=S.tournament?.players||[];
+  const cards=S.players.map((p,idx)=>{
+    const on=sel.includes(p.id);
+    const col=playerColor(idx);
+    return `<div class="player-select-card ${on?'selected':''}" onclick="toggleTournamentPlayer('${p.id}')"
+      style="border-color:${on?col.bg:'var(--border)'};${on?'background:'+col.bg+'18;':''}">
+      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
+      <div class="player-name">${esc(p.name)}</div>
+      <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
+    </div>`;
+  }).join('');
+  const ok=sel.length>=2;
+  div.innerHTML=`
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Turnaus</div>
+    </div>
+    <div class="order-hint">Valitse vähintään 2 pelaajaa. Turnaus arvotaan automaattisesti.</div>
+    <div class="player-select-list">${cards}</div>
+    <div style="padding:10px 14px;">
+      <div class="config-label">Pelityyppi</div>
+      <div class="option-row" style="margin-top:6px;">
+        <button class="option-btn ${(S.tournament?.gameType||'501')==='501'?'selected':''}" onclick="setTConfig('gameType','501');render()">501</button>
+        <button class="option-btn ${(S.tournament?.gameType||'501')==='301'?'selected':''}" onclick="setTConfig('gameType','301');render()">301</button>
+        <button class="option-btn ${(S.tournament?.gameType||'501')==='701'?'selected':''}" onclick="setTConfig('gameType','701');render()">701</button>
+      </div>
+    </div>
+    <div style="padding:6px 14px 14px;">
+      <button class="btn large ${ok?'':'disabled'}" onclick="${ok?'startTournament()':'void(0)'}">Aloita turnaus &#127942;</button>
+    </div>
+  `;
+  return div;
+}
+
+function setTConfig(k,v) {
+  if(!S.tournament) S.tournament={players:[],gameType:'501'};
+  S.tournament[k]=v;
+}
+
+function toggleTournamentPlayer(id) {
+  if(!S.tournament) S.tournament={players:[],gameType:'501'};
+  const arr=S.tournament.players;
+  const i=arr.indexOf(id);
+  if(i===-1) arr.push(id); else arr.splice(i,1);
+  nav('tournament-setup');
+}
+
+function startTournament() {
+  const t=S.tournament;
+  const players=[...t.players].sort(()=>Math.random()-0.5);
+  // Build bracket - pad to power of 2
+  const n=players.length;
+  const size=Math.pow(2,Math.ceil(Math.log2(Math.max(n,2))));
+  const padded=[...players,...Array(size-n).fill('bye')];
+  const matches=[];
+  for(let i=0;i<size;i+=2){
+    matches.push({p1:padded[i],p2:padded[i+1],winner:padded[i+1]==='bye'?padded[i]:null,round:0,idx:matches.length});
+  }
+  S.tournament={...t, bracket:[matches], currentMatch:null, round:0, size, done:false};
+  // Auto-advance byes
+  advanceByes();
+  nav('tournament-bracket');
+}
+
+function advanceByes() {
+  const t=S.tournament;
+  const roundMatches=t.bracket[t.round];
+  roundMatches.forEach(m=>{ if(m.p2==='bye'&&!m.winner) m.winner=m.p1; });
+  // Check if round done
+  if(roundMatches.every(m=>m.winner)){
+    const winners=roundMatches.map(m=>m.winner);
+    if(winners.length===1){ t.done=true; t.champion=winners[0]; return; }
+    const nextRound=[];
+    for(let i=0;i<winners.length;i+=2){
+      nextRound.push({p1:winners[i],p2:winners[i+1]||'bye',winner:winners[i+1]?null:winners[i],round:t.round+1,idx:nextRound.length});
+    }
+    t.bracket.push(nextRound); t.round++;
+    advanceByes();
+  }
+}
+
+function startTournamentMatch(matchIdx) {
+  const t=S.tournament;
+  const m=t.bracket[t.round][matchIdx];
+  if(!m||m.winner) return;
+  t.currentMatch={round:t.round,idx:matchIdx};
+  // Setup game
+  const p1=S.players.find(x=>x.id===m.p1);
+  const p2=S.players.find(x=>x.id===m.p2);
+  if(!p1||!p2) return;
+  const start=t.gameType==='301'?301:t.gameType==='701'?701:501;
+  S.game={type:t.gameType,gameOver:false,winner:null,startTime:Date.now(),currentPlayerIndex:0,currentDarts:[],modifier:null,
+    startScore:start,checkoutMode:'double',legs:1,legsToWin:1,
+    players:[{id:p1.id,name:p1.name,score:start,history:[],legsWon:0},{id:p2.id,name:p2.name,score:start,history:[],legsWon:0}],
+    turnStartScore:start, isTournamentMatch:true};
+  nav('game');
+}
+
+function tournamentMatchDone(winnerId) {
+  const t=S.tournament;
+  if(!t||!t.currentMatch) return;
+  const m=t.bracket[t.currentMatch.round][t.currentMatch.idx];
+  m.winner=winnerId;
+  t.currentMatch=null;
+  // Check round done
+  const roundMatches=t.bracket[t.round];
+  if(roundMatches.every(m=>m.winner)){
+    const winners=roundMatches.map(m=>m.winner);
+    if(winners.length===1){ t.done=true; t.champion=winners[0]; nav('tournament-bracket'); return; }
+    const nextRound=[];
+    for(let i=0;i<winners.length;i+=2){
+      nextRound.push({p1:winners[i],p2:winners[i+1]||'bye',winner:winners[i+1]?null:winners[i],round:t.round+1,idx:nextRound.length});
+    }
+    t.bracket.push(nextRound); t.round++;
+    advanceByes();
+  }
+  nav('tournament-bracket');
+}
+
+function renderTournamentBracket() {
+  const t=S.tournament;
+  if(!t){return renderHome();}
+  const div=el('div','screen');
+  const pName=id=>S.players.find(p=>p.id===id)?.name||'?';
+  const pCol=id=>{const idx=t.bracket[0].findIndex(m=>m.p1===id||m.p2===id);return playerColor(idx>=0?idx:0);};
+
+  let bracketHtml='';
+  t.bracket.forEach((round,ri)=>{
+    const rNames=['1. kierros','Puoliväli','Välierä','Finaali'];
+    const rName=rNames[ri]||`Kierros ${ri+1}`;
+    bracketHtml+=`<div style="margin-bottom:16px;"><div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:0 14px 6px;">${rName.toUpperCase()}</div>`;
+    round.forEach((m,mi)=>{
+      const p1n=m.p1==='bye'?'—':pName(m.p1);
+      const p2n=m.p2==='bye'?'—':pName(m.p2);
+      const done=!!m.winner;
+      const current=t.currentMatch?.round===ri&&t.currentMatch?.idx===mi;
+      const playable=ri===t.round&&!done&&m.p2!=='bye';
+      const col1=m.p1!=='bye'?pCol(m.p1).bg:'var(--muted)';
+      const col2=m.p2!=='bye'?pCol(m.p2).bg:'var(--muted)';
+      bracketHtml+=`<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid ${done?'rgba(0,232,122,0.3)':'var(--border)'};border-radius:12px;overflow:hidden;${playable?'cursor:pointer;':''}" ${playable?'onclick="startTournamentMatch('+mi+')"':''}>
+        <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border);${m.winner===m.p1?'background:rgba(0,232,122,0.08);':''}">
+          <div style="width:10px;height:10px;border-radius:50%;background:${col1};margin-right:10px;"></div>
+          <div style="flex:1;font-size:16px;font-weight:600;color:${m.winner===m.p1?'var(--accent)':'var(--text)'};">${esc(p1n)}</div>
+          ${m.winner===m.p1?'<div style="color:var(--accent);font-size:18px;">✓</div>':''}
+        </div>
+        <div style="display:flex;align-items:center;padding:12px 14px;${m.winner===m.p2?'background:rgba(0,232,122,0.08);':''}">
+          <div style="width:10px;height:10px;border-radius:50%;background:${col2};margin-right:10px;"></div>
+          <div style="flex:1;font-size:16px;font-weight:600;color:${m.winner===m.p2?'var(--accent)':'var(--text)'};">${esc(p2n)}</div>
+          ${m.winner===m.p2?'<div style="color:var(--accent);font-size:18px;">✓</div>':''}
+        </div>
+        ${playable?'<div style="text-align:center;padding:8px;font-size:13px;color:var(--accent);border-top:1px solid var(--border);">▶ Pelaa ottelu</div>':''}
+      </div>`;
+    });
+    bracketHtml+='</div>';
+  });
+
+  if(t.done&&t.champion) {
+    const champ=pName(t.champion);
+    bracketHtml=`<div style="text-align:center;padding:24px;"><div style="font-size:64px;margin-bottom:8px;">🏆</div>
+      <div style="font-family:var(--fd);font-size:42px;color:var(--gold);">${esc(champ)}</div>
+      <div style="color:var(--muted);margin-top:6px;">TURNAUKSEN VOITTAJA</div></div>`+bracketHtml;
+  }
+
+  div.innerHTML=`
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Turnaus ${t.done?'✓':''}</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;">${bracketHtml}</div>
+    ${!t.done?`<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`:`<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`}
+  `;
+  return div;
+}
+
+function renderTournamentGame() { return renderGame(); }
 
 // ==================== HELPERS ====================
 function animateScore(fromVal, toVal, mode) {
