@@ -15,6 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 <style>
 :root {
   --bg: #08080f;
@@ -240,6 +241,16 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .empty-state p { font-size:14px; line-height:1.5; }
 .loader { display:flex; align-items:center; justify-content:center; padding:40px; color:var(--muted); font-size:14px; }
 
+/* LOGIN */
+.login-screen { height:100vh; height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 24px; background:var(--bg); }
+.login-logo { font-size:64px; margin-bottom:8px; }
+.login-title { font-family:var(--fd); font-size:52px; letter-spacing:6px; color:var(--accent); text-shadow:0 0 40px rgba(0,232,122,0.35); margin-bottom:4px; }
+.login-sub { font-size:12px; color:var(--muted); letter-spacing:3px; margin-bottom:36px; }
+.login-form { width:100%; max-width:340px; display:flex; flex-direction:column; gap:12px; }
+.login-input { background:var(--card); border:1px solid var(--border); color:var(--text); padding:14px 16px; border-radius:12px; font-family:var(--fu); font-size:16px; outline:none; width:100%; }
+.login-input:focus { border-color:var(--accent); }
+.login-error { color:var(--red); font-size:13px; text-align:center; min-height:18px; }
+
 /* ORDER HINT */
 .order-hint { font-size:12px; color:var(--muted); padding:6px 16px; text-align:center; }
 
@@ -292,14 +303,90 @@ const FIREBASE_CONFIG = {
 };
 
 let db = null;
+let auth = null;
+let currentUser = null;
+
 function initFirebase() {
   try {
     if (!firebase.apps.length) {
       firebase.initializeApp(FIREBASE_CONFIG);
     }
     db = firebase.firestore();
+    auth = firebase.auth();
     return true;
   } catch(e) { console.error('FB init:', e); return false; }
+}
+
+function initAuth(callback) {
+  if (!auth) { callback(null); return; }
+  auth.onAuthStateChanged(user => {
+    currentUser = user;
+    callback(user);
+  });
+}
+
+async function login(email, password) {
+  if (!auth) return { error: 'Firebase ei alustettu' };
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    return { ok: true };
+  } catch(e) {
+    const msgs = {
+      'auth/wrong-password': 'Väärä salasana',
+      'auth/user-not-found': 'Käyttäjää ei löydy',
+      'auth/invalid-email': 'Virheellinen sähköposti',
+      'auth/invalid-credential': 'Väärä sähköposti tai salasana',
+      'auth/too-many-requests': 'Liian monta yritystä. Yritä myöhemmin.',
+    };
+    return { error: msgs[e.code] || e.message };
+  }
+}
+
+async function logout() {
+  if (!auth) return;
+  localStorage.removeItem('darts_game');
+  S.game = null;
+  await auth.signOut();
+  currentUser = null;
+  renderLoginScreen();
+}
+
+function renderLoginScreen() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'login-screen';
+  div.innerHTML = `
+    <div class="login-logo">🎯</div>
+    <div class="login-title">DARTS</div>
+    <div class="login-sub">PELIN SEURANTASOVELLUS</div>
+    <div class="login-form">
+      <input class="login-input" id="login-email" type="email" placeholder="Sähköposti" autocomplete="email" autocapitalize="none">
+      <input class="login-input" id="login-pass" type="password" placeholder="Salasana" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button class="btn large" id="login-btn" onclick="doLogin()">Kirjaudu sisään</button>
+    </div>
+  `;
+  app.appendChild(div);
+  setTimeout(() => document.getElementById('login-email')?.focus(), 100);
+  document.getElementById('login-pass').addEventListener('keydown', e => {
+    if(e.key === 'Enter') doLogin();
+  });
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  const pass = document.getElementById('login-pass')?.value;
+  const errEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
+  if(!email || !pass) { if(errEl) errEl.textContent = 'Täytä kaikki kentät'; return; }
+  if(btn) { btn.textContent = 'Kirjaudutaan...'; btn.style.opacity='0.7'; }
+  const result = await login(email, pass);
+  if(result.error) {
+    if(errEl) errEl.textContent = result.error;
+    if(btn) { btn.textContent = 'Kirjaudu sisään'; btn.style.opacity='1'; }
+  }
+  // onAuthStateChanged handles success → render()
 }
 
 async function fbSaveGame(data) {
@@ -558,6 +645,7 @@ function renderHome() {
       <span class="dart">🎯</span>
       <h1>DARTS</h1>
       <p>Pelin seurantasovellus</p>
+      <div style="margin-top:6px;font-size:11px;color:var(--muted);">${currentUser?currentUser.email:''}</div>
     </div>
     <div class="home-menu">
       <button class="menu-btn primary" onclick="startNew()">
@@ -577,6 +665,9 @@ function renderHome() {
       </button>
       <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
         <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
+      </button>
+      <button class="menu-btn" onclick="if(confirm('Kirjaudutaanko ulos?'))logout()" style="border-color:rgba(255,51,85,0.25);">
+        <span class="icon">&#128682;</span><span class="label">Kirjaudu ulos</span><span class="arrow" style="color:var(--red);">›</span>
       </button>
     </div>
   `;
@@ -1566,7 +1657,7 @@ function halveitUndo(){const g=S.game;if(!g.currentDarts.length)return;const las
 function halveitNext(){
   const g=S.game;const p=g.players[g.currentPlayerIndex];
   const sc=p.turnPts||0;
-  if(sc===0){p.score=Math.floor(p.score/2);showToast(`${p.name}: Huti! Puolittui → ${p.score}`,'error');}
+  if(sc===0){p.score=Math.floor(p.score/2);showToast(p.name+': Huti! Puolittui → '+p.score,'error');}
   else{p.score+=sc;}
   p.turnPts=0;
   p.history.push({darts:[...g.currentDarts],scored:sc});
@@ -2314,17 +2405,25 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 // ==================== INIT ====================
 async function init() {
   initFirebase();
-  // Restore in-progress game
-  try {
-    const saved = localStorage.getItem('darts_game');
-    if (saved) {
-      S.game = JSON.parse(saved);
-      S.screen = 'game';
+  // Check auth state first
+  initAuth(async (user) => {
+    if (!user) {
+      renderLoginScreen();
+      return;
     }
-  } catch(e) { localStorage.removeItem('darts_game'); }
-  // Load players from Firebase
-  await loadPlayers();
-  render();
+    currentUser = user;
+    // Restore in-progress game
+    try {
+      const saved = localStorage.getItem('darts_game');
+      if (saved) {
+        S.game = JSON.parse(saved);
+        S.screen = 'game';
+      }
+    } catch(e) { localStorage.removeItem('darts_game'); }
+    // Load players from Firebase
+    await loadPlayers();
+    render();
+  });
 }
 window.addEventListener("load", init);
 </script>
