@@ -641,11 +641,17 @@ function render() {
 function renderHome() {
   const div = el('div','screen');
   div.innerHTML = `
-    <div class="home-logo">
-      <span class="dart">🎯</span>
-      <h1>DARTS</h1>
-      <p>Pelin seurantasovellus</p>
-      <div style="margin-top:6px;font-size:11px;color:var(--muted);">${currentUser?currentUser.email:''}</div>
+    <div style="position:relative;">
+      <div class="home-logo">
+        <span class="dart">🎯</span>
+        <h1>DARTS</h1>
+        <p>Pelin seurantasovellus</p>
+        <div style="margin-top:4px;font-size:11px;color:var(--muted);">${currentUser?currentUser.email:''}</div>
+      </div>
+      <button onclick="if(confirm('Kirjaudutaanko ulos?'))logout()"
+        style="position:absolute;top:12px;right:16px;background:none;border:1px solid rgba(255,51,85,0.3);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:8px;cursor:pointer;font-family:var(--fu);font-weight:600;letter-spacing:1px;">
+        ULOS
+      </button>
     </div>
     <div class="home-menu">
       <button class="menu-btn primary" onclick="startNew()">
@@ -666,9 +672,7 @@ function renderHome() {
       <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
         <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
       </button>
-      <button class="menu-btn" onclick="if(confirm('Kirjaudutaanko ulos?'))logout()" style="border-color:rgba(255,51,85,0.25);">
-        <span class="icon">&#128682;</span><span class="label">Kirjaudu ulos</span><span class="arrow" style="color:var(--red);">›</span>
-      </button>
+
     </div>
   `;
   return div;
