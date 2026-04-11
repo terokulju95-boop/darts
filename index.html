@@ -501,6 +501,7 @@ function render() {
     'setup-players': renderSetupPlayers,
     game: renderGame, gameover: renderGameOver,
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
+    'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
   };
   const fn = fns[S.screen];
   if (fn) { app.innerHTML = ''; app.appendChild(fn()); }
@@ -1976,10 +1977,41 @@ window.addEventListener("load", init);
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then(r => console.log('SW registered'))
-      .catch(e => console.log('SW error:', e));
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      console.log('SW ok');
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        nw.addEventListener('statechange', () => {
+          if(nw.state==='installed' && navigator.serviceWorker.controller) {
+            window._swReg = reg;
+            const btn=document.getElementById('update-btn');
+            const lbl=document.getElementById('update-label');
+            if(btn){btn.style.borderColor='rgba(68,136,255,0.7)';}
+            if(lbl)lbl.textContent='🔵 Päivitys saatavilla!';
+          }
+        });
+      });
+      setInterval(()=>reg.update(),60000);
+    }).catch(e=>console.warn('SW fail:',e));
   });
+}
+
+function checkForUpdate() {
+  const label = document.getElementById('update-label');
+  if(label) label.textContent = 'Tyhjennetään...';
+  Promise.resolve()
+    .then(()=>{
+      if('caches' in window)
+        return caches.keys().then(keys=>Promise.all(keys.map(k=>caches.delete(k))));
+    })
+    .then(()=>{
+      if(navigator.serviceWorker)
+        return navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(r=>r.unregister())));
+    })
+    .then(()=>{
+      window.location.href = window.location.pathname + '?nocache=' + Date.now();
+    })
+    .catch(()=>window.location.reload(true));
 }
 </script>
 
