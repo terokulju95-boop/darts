@@ -390,6 +390,34 @@ async function fbUpdatePlayerStats(id, wins, games) {
   try { await db.collection('darts_players').doc(id).update({ wins, games }); } catch(e) { console.error(e); }
 }
 
+async function fbUpdatePlayerProfile(id, wins, games, gs) {
+  if (!db) return;
+  try {
+    // Load current player data to compare records
+    const doc = await db.collection('darts_players').doc(id).get();
+    const cur = doc.exists ? doc.data() : {};
+    const update = {
+      wins, games,
+      totalTurns: (cur.totalTurns||0) + (gs.turns||0),
+      totalBusts: (cur.totalBusts||0) + (gs.busts||0),
+      total180s: (cur.total180s||0) + (gs.s180||0),
+      total100plus: (cur.total100plus||0) + (gs.s100plus||0),
+      bestTurn: Math.max(cur.bestTurn||0, gs.best||0),
+      bestCheckout: Math.max(cur.bestCheckout||0, gs.checkout||0),
+      // Running average: weighted
+      allTimeAvg: (() => {
+        const prevTurns = cur.totalTurns||0;
+        const prevAvgSum = (cur.allTimeAvgSum||0);
+        const newSum = prevAvgSum + (gs.avg||0) * (gs.turns||0);
+        const newTurns = prevTurns + (gs.turns||0);
+        return newTurns > 0 ? Math.round(newSum/newTurns*10)/10 : 0;
+      })(),
+      allTimeAvgSum: (cur.allTimeAvgSum||0) + (gs.avg||0)*(gs.turns||0),
+    };
+    await db.collection('darts_players').doc(id).update(update);
+  } catch(e) { console.error('fbUpdatePlayerProfile:', e); }
+}
+
 function genId() { return Math.random().toString(36).slice(2,10); }
 
 // ==================== GAME DEFINITIONS ====================
@@ -502,6 +530,7 @@ function render() {
     game: renderGame, gameover: renderGameOver,
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
     'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
+    'player-profile': renderPlayerProfile,
   };
   const fn = fns[S.screen];
   if (fn) { app.innerHTML = ''; app.appendChild(fn()); }
@@ -548,16 +577,23 @@ function startNew() {
 // ==================== PLAYERS ====================
 function renderPlayers() {
   const div = el('div','screen');
-  const cards = S.players.length ? S.players.map(p => `
-    <div class="player-card">
-      <div class="player-avatar">${p.name[0].toUpperCase()}</div>
+  const cards = S.players.length ? S.players.map((p,idx) => {
+    const col = playerColor(idx);
+    const winPct = p.games>0?Math.round(p.wins/p.games*100):0;
+    return `
+    <div class="player-card" onclick="showPlayerProfile('${p.id}')" style="cursor:pointer;border-left:3px solid ${col.bg};">
+      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
       <div style="flex:1">
         <div class="player-name">${esc(p.name)}</div>
-        <div class="player-stat">${p.games||0} peliä · ${p.wins||0} voittoa</div>
+        <div class="player-stat">${p.games||0} peliä · ${p.wins||0} voittoa · ${winPct}%</div>
+        ${p.bestTurn?`<div style="font-size:11px;color:${col.bg};margin-top:2px;">⚡ Paras vuoro: ${p.bestTurn} · Avg: ${p.allTimeAvg||0}</div>`:''}
       </div>
-      <button class="player-del" onclick="delPlayer('${p.id}')">Poista</button>
-    </div>
-  `).join('') : `<div class="empty-state"><span class="ei">👤</span><p>Ei pelaajia vielä.<br>Lisää uusi alta.</p></div>`;
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+        <button class="player-del" onclick="event.stopPropagation();delPlayer('${p.id}')">Poista</button>
+        <span style="font-size:11px;color:var(--muted);">Profiili ›</span>
+      </div>
+    </div>`;
+  }).join('') : `<div class="empty-state"><span class="ei">👤</span><p>Ei pelaajia vielä.<br>Lisää uusi alta.</p></div>`;
 
   div.innerHTML = `
     <div class="header">
@@ -1527,6 +1563,29 @@ function endGame() {
       });
     });
   }
+  // Calculate per-player game stats
+  const gamePlayerStats = {};
+  const isX01gs = ['501','301','701','custom_x01'].includes(g.type);
+  if(isX01gs) {
+    g.players.forEach(pl => {
+      const turns = (pl.history||[]).filter(h=>!h.bust&&h.scored>0);
+      const scores = turns.map(h=>h.scored);
+      const allTurns = pl.history||[];
+      const busts = allTurns.filter(h=>h.bust).length;
+      const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+      const best = scores.length ? Math.max(...scores) : 0;
+      const s180 = scores.filter(s=>s===180).length;
+      const s100plus = scores.filter(s=>s>=100).length;
+      // Highest checkout = last scored turn of winner
+      let checkout = 0;
+      if(g.winner && pl.id===g.winner.id && allTurns.length) {
+        const lastTurn = allTurns[allTurns.length-1];
+        if(!lastTurn.bust) checkout = lastTurn.scored||0;
+      }
+      gamePlayerStats[pl.id] = { avg, best, busts, turns:allTurns.length, s180, s100plus, checkout };
+    });
+  }
+
   fbSaveGame({
     type:g.type,
     winner:g.winner?{id:g.winner.id,name:g.winner.name}:null,
@@ -1536,9 +1595,19 @@ function endGame() {
     startScore:g.startScore||null,
     duration:dur,
     turnLog: turnLog.slice(0,200),
+    playerStats: gamePlayerStats,
   });
+
+  // Update player profile stats in Firebase
   if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
-  g.players.forEach(gp=>{const p=S.players.find(p=>p.id===gp.id);if(p){p.games=(p.games||0)+1;fbUpdatePlayerStats(p.id,p.wins,p.games);}});
+  g.players.forEach(gp=>{
+    const p=S.players.find(p=>p.id===gp.id);
+    if(p){
+      p.games=(p.games||0)+1;
+      const gs=gamePlayerStats[gp.id]||{};
+      fbUpdatePlayerProfile(p.id, p.wins, p.games, gs);
+    }
+  });
   localStorage.removeItem('darts_game');
   if(g.isTournamentMatch && S.tournament && g.winner) {
     tournamentMatchDone(g.winner.id);
@@ -1702,14 +1771,27 @@ async function goStats() {
   chronological.forEach(g=>{
     if(!g.players)return;
     g.players.forEach(p=>{
-      if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{},streak:0,maxStreak:0,last10:[]};
+      if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
       st[p.id].games++;
       st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
       const won = g.winner?.id===p.id;
       if(won){ st[p.id].wins++; st[p.id].streak++; st[p.id].maxStreak=Math.max(st[p.id].maxStreak,st[p.id].streak); }
       else { st[p.id].streak=0; }
       if(st[p.id].last10.length<10) st[p.id].last10.push(won?1:0);
+      // Merge per-game stats
+      const ps = g.playerStats?.[p.id];
+      if(ps) {
+        if(ps.avg&&ps.turns){st[p.id].avgSum+=(ps.avg*ps.turns);st[p.id].avgCount+=ps.turns;}
+        if(ps.best>st[p.id].bestTurn) st[p.id].bestTurn=ps.best;
+        if(ps.checkout>st[p.id].bestCheckout) st[p.id].bestCheckout=ps.checkout;
+        st[p.id].total180+=(ps.s180||0);
+        st[p.id].total100+=(ps.s100plus||0);
+      }
     });
+  });
+  // Compute averages
+  Object.values(st).forEach(s=>{
+    s.allTimeAvg = s.avgCount>0?Math.round(s.avgSum/s.avgCount*10)/10:0;
   });
   // Reverse last10 so newest is last (for chart left-to-right)
   Object.values(st).forEach(s=>s.last10.reverse());
@@ -1739,6 +1821,10 @@ function renderStats() {
         <div class="stat-row"><span>Voitto%</span><span class="stat-val">${s.games>0?Math.round(s.wins/s.games*100):0}%</span></div>
         <div class="stat-row"><span>Voittoputki</span><span class="stat-val">${s.streak} ${streakEmoji}</span></div>
         <div class="stat-row"><span>Paras putki</span><span class="stat-val">${s.maxStreak}</span></div>
+        ${s.allTimeAvg?`<div class="stat-row"><span>All-time avg</span><span class="stat-val">${s.allTimeAvg}</span></div>`:''}
+        ${s.bestTurn?`<div class="stat-row"><span>Paras vuoro</span><span class="stat-val">${s.bestTurn} pts</span></div>`:''}
+        ${s.bestCheckout?`<div class="stat-row"><span>Korkein checkout</span><span class="stat-val">${s.bestCheckout} pts</span></div>`:''}
+        ${s.total180?`<div class="stat-row"><span>180-kierrokset</span><span class="stat-val">x${s.total180} 🎯</span></div>`:''}
         <div class="stat-row"><span>Suosikkipeli</span><span class="stat-val">${Object.entries(s.types).sort((a,b)=>b[1]-a[1])[0]?.[0]||'–'}</span></div>
         ${s.last10.length>0?`<div style="margin-top:10px;"><div style="font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:1px;">VIIMEISET ${s.last10.length} PELIÄ</div>
         <div style="display:flex;gap:3px;height:32px;align-items:flex-end;">${last10bars}</div></div>`:''}
@@ -1966,6 +2052,148 @@ function renderTournamentBracket() {
 }
 
 function renderTournamentGame() { return renderGame(); }
+
+// ==================== PLAYER PROFILE ====================
+async function showPlayerProfile(id) {
+  const p = S.players.find(x=>x.id===id);
+  if(!p) return;
+  // Load fresh data from Firebase
+  if(db) {
+    try {
+      const doc = await db.collection('darts_players').doc(id).get();
+      if(doc.exists) Object.assign(p, doc.data());
+    } catch(e) {}
+  }
+  // Load player's game history
+  if(db) {
+    try {
+      // Load recent games and filter for this player client-side
+      const snap = await db.collection('darts_games').orderBy('createdAt','desc').limit(60).get();
+      const all = snap.docs.map(d=>({id:d.id,...d.data()}));
+      p._games = all.filter(g=>(g.players||[]).some(pl=>pl.id===p.id));
+    } catch(e) { p._games = []; }
+  }
+  S.profilePlayer = p;
+  nav('player-profile');
+}
+
+function renderPlayerProfile() {
+  const p = S.profilePlayer;
+  if(!p) { nav('players'); return; }
+  const div = el('div','screen');
+  const idx = S.players.findIndex(x=>x.id===p.id);
+  const col = playerColor(idx>=0?idx:0);
+  const games = p._games || [];
+  const winPct = p.games>0?Math.round(p.wins/p.games*100):0;
+  const bustPct = p.totalTurns>0?Math.round((p.totalBusts||0)/p.totalTurns*100):0;
+  const streak = (() => {
+    let s=0;
+    for(const g of games){if(g.winner?.id===p.id)s++;else break;}
+    return s;
+  })();
+
+  // Nemesis & Victim analysis
+  const opponents = {};
+  games.forEach(g=>{
+    if(!g.players||g.players.length<2) return;
+    const others = g.players.filter(pl=>pl.id!==p.id);
+    others.forEach(opp=>{
+      if(!opponents[opp.id]) opponents[opp.id]={name:opp.name,wins:0,losses:0};
+      if(g.winner?.id===p.id) opponents[opp.id].wins++;
+      else if(g.winner) opponents[opp.id].losses++;
+    });
+  });
+  const oppList = Object.values(opponents);
+  const nemesis = oppList.sort((a,b)=>(b.losses-b.wins)-(a.losses-a.wins))[0];
+  const victim = oppList.sort((a,b)=>(b.wins-b.losses)-(a.wins-a.losses))[0];
+
+  // Last 10 results
+  const last10 = games.slice(0,10).map(g=>{
+    const won = g.winner?.id===p.id;
+    return `<div style="width:28px;height:28px;border-radius:50%;background:${won?col.bg:'var(--card2)'};border:2px solid ${won?col.bg:'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${won?col.text:'var(--muted)'};">${won?'V':'H'}</div>`;
+  }).join('');
+
+  // Recent games list
+  const recentGames = games.slice(0,8).map(g=>{
+    const won = g.winner?.id===p.id;
+    const gName = GAMES.find(t=>t.id===g.type)?.name||g.type||'?';
+    const ps = g.playerStats?.[p.id];
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="width:8px;height:8px;border-radius:50%;background:${won?col.bg:'var(--red)'}; flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:600;">${gName} · ${won?'Voitto':'Häviö'}</div>
+        <div style="font-size:11px;color:var(--muted);">${fmtDate(g.createdAt)}</div>
+      </div>
+      ${ps?`<div style="text-align:right;font-size:12px;color:var(--muted);">avg ${ps.avg||0}<br>best ${ps.best||0}</div>`:''}
+    </div>`;
+  }).join('');
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('players')">‹ Takaisin</button>
+      <div class="header-title">Profiili</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding-bottom:24px;">
+      <!-- HERO -->
+      <div style="background:linear-gradient(135deg,${col.bg}22,${col.bg}08);border-bottom:1px solid ${col.bg}33;padding:20px 16px;display:flex;align-items:center;gap:16px;">
+        <div style="width:64px;height:64px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:32px;font-weight:700;box-shadow:0 0 24px ${col.bg}55;">
+          ${p.name[0].toUpperCase()}
+        </div>
+        <div>
+          <div style="font-family:var(--fd);font-size:32px;color:${col.bg};letter-spacing:2px;">${esc(p.name).toUpperCase()}</div>
+          <div style="font-size:13px;color:var(--muted);">${p.games||0} peliä · ${p.wins||0} voittoa · ${winPct}% voitto</div>
+          ${streak>=2?`<div style="font-size:12px;color:var(--gold);margin-top:2px;">🔥 ${streak} pelin voittoputki!</div>`:''}
+        </div>
+      </div>
+
+      <!-- KEY STATS GRID -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border);margin-bottom:12px;">
+        ${[
+          ['Avg / vuoro', p.allTimeAvg||'–', col.bg],
+          ['Paras vuoro', p.bestTurn||'–', 'var(--gold)'],
+          ['Korkein checkout', p.bestCheckout||'–', 'var(--accent)'],
+          ['180-kierrokset', p.total180s||0, '#ff6b35'],
+          ['100+ kierrokset', p.total100plus||0, 'var(--blue)'],
+          ['Bust-%', bustPct+'%', 'var(--red)'],
+        ].map(([label,val,color])=>`
+          <div style="background:var(--surface);padding:12px 10px;text-align:center;">
+            <div style="font-family:var(--fd);font-size:26px;color:${color};">${val}</div>
+            <div style="font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:2px;">${label.toUpperCase()}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- DETAILED STATS -->
+      <div style="padding:0 14px;">
+        <div class="stat-card" style="border-left:3px solid ${col.bg};margin-bottom:12px;">
+          <div class="gstat-title">Yleiset tilastot</div>
+          <div class="gstat-row"><span>Vuoroja heitetty</span><span class="gstat-val">${p.totalTurns||0}</span></div>
+          <div class="gstat-row"><span>Busteja yhteensä</span><span class="gstat-val">${p.totalBusts||0}</span></div>
+          <div class="gstat-row"><span>Suosikkipeli</span><span class="gstat-val">${(()=>{const t={};games.forEach(g=>{t[g.type]=(t[g.type]||0)+1;});const e=Object.entries(t).sort((a,b)=>b[1]-a[1])[0];return e?GAMES.find(x=>x.id===e[0])?.name||e[0]:'–';})()}</span></div>
+        </div>
+
+        ${oppList.length ? `<div class="stat-card" style="border-left:3px solid var(--gold);margin-bottom:12px;">
+          <div class="gstat-title">Vastustajat</div>
+          ${nemesis&&nemesis.losses>0?`<div class="gstat-row"><span>😈 Nemesis (häviät useiten)</span><span class="gstat-val">${esc(nemesis.name)}</span></div>`:''}
+          ${victim&&victim.wins>0?`<div class="gstat-row"><span>💪 Uhri (voitat useiten)</span><span class="gstat-val">${esc(victim.name)}</span></div>`:''}
+          ${oppList.sort((a,b)=>b.wins+b.losses-a.wins-a.losses).slice(0,4).map(o=>`
+            <div class="gstat-row"><span>${esc(o.name)}</span><span class="gstat-val" style="color:${o.wins>o.losses?col.bg:'var(--red)'};">${o.wins}V – ${o.losses}H</span></div>
+          `).join('')}
+        </div>` : ''}
+
+        ${last10 ? `<div class="stat-card" style="border-left:3px solid var(--muted);margin-bottom:12px;">
+          <div class="gstat-title">Viimeiset ${games.slice(0,10).length} peliä</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${last10}</div>
+        </div>` : ''}
+
+        ${recentGames ? `<div class="stat-card" style="margin-bottom:12px;">
+          <div class="gstat-title">Pelihistoria</div>
+          ${recentGames}
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+  return div;
+}
 
 // ==================== HELPERS ====================
 function animateScore(fromVal, toVal, mode) {
