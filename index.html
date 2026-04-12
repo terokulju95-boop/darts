@@ -2580,7 +2580,9 @@ function renderLeaderboard() {
 }
 
 // ==================== RECORDS ====================
-async function goRecords() {
+async function goRecords(tab) {
+  S.recordsTab = tab || S.recordsTab || 'all';
+  S.recordsPlayer = S.recordsPlayer || null;
   nav('records');
   if(!db) return;
   try {
@@ -2593,60 +2595,123 @@ async function goRecords() {
 function renderRecords() {
   const div = el('div','screen');
   const players = S.recordsData || [];
+  const tab = S.recordsTab || 'all';
+  const selPlayer = S.recordsPlayer || null;
 
-  function best(fn, fmt) {
-    if(!players.length) return {name:'–',val:'–'};
-    const p = players.reduce((a,b)=>fn(a)>=fn(b)?a:b);
-    return {name:p.name, val:fmt(fn(p)), col:playerColor(S.players.findIndex(x=>x.id===p.id)).bg};
+  // Tab buttons
+  const tabBtns = `
+    <div style="display:flex;gap:8px;padding:10px 14px 6px;">
+      <button onclick="S.recordsTab='all';render()" style="flex:1;padding:10px;border-radius:10px;font-family:var(--fu);font-size:15px;font-weight:700;cursor:pointer;border:1px solid ${tab==='all'?'var(--accent)':'var(--border)'};background:${tab==='all'?'var(--accent)':'var(--card)'};color:${tab==='all'?'#000':'var(--text)'};">🏆 Kaikki</button>
+      <button onclick="S.recordsTab='player';render()" style="flex:1;padding:10px;border-radius:10px;font-family:var(--fu);font-size:15px;font-weight:700;cursor:pointer;border:1px solid ${tab==='player'?'var(--accent)':'var(--border)'};background:${tab==='player'?'var(--accent)':'var(--card)'};color:${tab==='player'?'#000':'var(--text)'};">👤 Pelaajittain</button>
+    </div>`;
+
+  if(tab === 'all') {
+    // ---- ALL-TIME RECORDS ----
+    function best(fn, fmt) {
+      if(!players.length) return {name:'–',val:'–',col:'var(--muted)'};
+      const p = players.reduce((a,b)=>fn(a)>=fn(b)?a:b);
+      return {name:p.name, val:fmt(fn(p)), col:playerColor(S.players.findIndex(x=>x.id===p.id)).bg};
+    }
+    const records = [
+      { icon:'⚡', label:'Korkein checkout',        ...best(p=>p.bestCheckout||0, v=>v+' pts') },
+      { icon:'💥', label:'Paras yksittäinen vuoro',  ...best(p=>p.bestTurn||0, v=>v+' pts') },
+      { icon:'📈', label:'Paras all-time avg',        ...best(p=>p.allTimeAvg||0, v=>v+' pts/vuoro') },
+      { icon:'🎰', label:'Eniten 180-kierroksia',     ...best(p=>p.total180s||0, v=>v+'×') },
+      { icon:'💯', label:'Eniten 100+ kierroksia',    ...best(p=>p.total100plus||0, v=>v+'×') },
+      { icon:'🏆', label:'Eniten voittoja',           ...best(p=>p.wins||0, v=>v+' voittoa') },
+      { icon:'🔥', label:'Pisin voittoputki',         ...best(p=>p.maxStreak||0, v=>v+' peliä') },
+      { icon:'🎯', label:'Eniten pelejä',             ...best(p=>p.games||0, v=>v+' peliä') },
+      { icon:'🏹', label:'Eniten tikkoja heitetty',   ...best(p=>(p.totalTurns||0)*3, v=>v+' tikkaa') },
+      { icon:'💀', label:'Eniten busteja',            ...best(p=>p.totalBusts||0, v=>v+' bustia') },
+      { icon:'👑', label:'Korkein voitto%',           ...best(p=>p.games>0?Math.round((p.wins||0)/p.games*100):0, v=>v+'%') },
+      { icon:'🥇', label:'Turnausvoittoja',           ...best(p=>p.tournamentWins||0, v=>v+'× voitto') },
+    ];
+    const cards = records.map(r=>`
+      <div style="background:rgba(22,22,34,0.75);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
+        <div style="font-size:28px;">${r.icon}</div>
+        <div style="flex:1;">
+          <div style="font-size:12px;color:var(--muted);letter-spacing:1px;">${r.label.toUpperCase()}</div>
+          <div style="font-size:15px;font-weight:700;margin-top:2px;color:${r.col||'var(--text)'};">${esc(r.name||'–')}</div>
+        </div>
+        <div style="font-family:var(--fd);font-size:22px;color:var(--accent);text-align:right;">${r.val}</div>
+      </div>`).join('');
+    const totalDarts = players.reduce((s,p)=>s+(p.totalTurns||0)*3,0);
+    const total180s = players.reduce((s,p)=>s+(p.total180s||0),0);
+    const totalGames = players.reduce((s,p)=>s+(p.games||0),0);
+    const totalBusts = players.reduce((s,p)=>s+(p.totalBusts||0),0);
+
+    div.innerHTML = `
+      <div class="header">
+        <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+        <div class="header-title">Ennätykset</div>
+      </div>
+      ${tabBtns}
+      <div style="padding:0 14px 20px;overflow-y:auto;flex:1;">
+        <div style="background:rgba(0,232,122,0.08);border:1px solid rgba(0,232,122,0.2);border-radius:12px;padding:12px 16px;margin-bottom:14px;">
+          <div style="font-family:var(--fd);font-size:16px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;">KAIKKI PELAAJAT YHTEENSÄ</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            ${[['🏹 Tikkoja heitetty',totalDarts.toLocaleString()],['🎰 180-kierrokset',total180s],['🎮 Pelejä pelattu',totalGames],['💀 Busteja yhteensä',totalBusts]].map(([l,v])=>`
+              <div style="text-align:center;"><div style="font-family:var(--fd);font-size:22px;">${v}</div><div style="font-size:11px;color:var(--muted);">${l}</div></div>`).join('')}
+          </div>
+        </div>
+        ${cards}
+      </div>`;
+
+  } else {
+    // ---- PLAYER-SPECIFIC RECORDS ----
+    const curP = selPlayer ? players.find(p=>p.id===selPlayer) : null;
+    const playerPicker = `
+      <div style="padding:0 14px 8px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${players.map((p,i)=>{
+          const col=playerColor(S.players.findIndex(x=>x.id===p.id));
+          const sel=selPlayer===p.id;
+          return `<button onclick="S.recordsPlayer='${p.id}';render()" style="padding:8px 14px;border-radius:20px;font-family:var(--fu);font-size:14px;font-weight:700;cursor:pointer;border:2px solid ${sel?col.bg:'var(--border)'};background:${sel?col.bg+'22':'var(--card)'};color:${sel?col.bg:'var(--text)'};">${esc(p.name)}</button>`;
+        }).join('')}
+      </div>`;
+
+    let content = '';
+    if(!curP) {
+      content = '<div class="empty-state"><span class="ei">👤</span><p>Valitse pelaaja ylhäältä</p></div>';
+    } else {
+      const col = playerColor(S.players.findIndex(x=>x.id===curP.id));
+      const winPct = curP.games>0?Math.round((curP.wins||0)/curP.games*100):0;
+      const bustPct = curP.totalTurns>0?Math.round((curP.totalBusts||0)/curP.totalTurns*100):0;
+      const statRows = [
+        ['⚡','Korkein checkout', (curP.bestCheckout||0)+' pts'],
+        ['💥','Paras yksittäinen vuoro', (curP.bestTurn||0)+' pts'],
+        ['📈','All-time avg', (curP.allTimeAvg||0)+' pts/vuoro'],
+        ['🎰','180-kierrokset', (curP.total180s||0)+'×'],
+        ['💯','100+ kierrokset', (curP.total100plus||0)+'×'],
+        ['🏆','Voittoja', (curP.wins||0)+' / '+(curP.games||0)+' peliä'],
+        ['👑','Voitto%', winPct+'%'],
+        ['🔥','Paras voittoputki', (curP.maxStreak||0)+' peliä'],
+        ['🏹','Tikkoja heitetty', ((curP.totalTurns||0)*3).toLocaleString()],
+        ['💀','Busteja', (curP.totalBusts||0)+' ('+bustPct+'%)'],
+        ['🥇','Turnausvoittoja', (curP.tournamentWins||0)+'×'],
+      ];
+      content = `
+        <div style="background:${col.bg}18;border:1px solid ${col.bg}44;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
+          <div style="font-family:var(--fd);font-size:24px;color:${col.bg};">${esc(curP.name||'').toUpperCase()}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${curP.games||0} peliä · ${curP.wins||0} voittoa</div>
+        </div>
+        ${statRows.map(([icon,label,val])=>`
+          <div style="background:rgba(22,22,34,0.75);border:1px solid var(--border);border-radius:12px;padding:13px 16px;margin-bottom:7px;display:flex;align-items:center;gap:12px;">
+            <div style="font-size:24px;">${icon}</div>
+            <div style="flex:1;font-size:13px;color:var(--muted);">${label.toUpperCase()}</div>
+            <div style="font-family:var(--fd);font-size:20px;color:var(--accent);">${val}</div>
+          </div>`).join('')}`;
+    }
+
+    div.innerHTML = `
+      <div class="header">
+        <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+        <div class="header-title">Ennätykset</div>
+      </div>
+      ${tabBtns}
+      ${playerPicker}
+      <div style="padding:0 14px 20px;overflow-y:auto;flex:1;">${content}</div>`;
   }
 
-  const records = [
-    { icon:'⚡', label:'Korkein checkout',   ...best(p=>p.bestCheckout||0, v=>v+' pts') },
-    { icon:'💥', label:'Paras yksittäinen vuoro', ...best(p=>p.bestTurn||0, v=>v+' pts') },
-    { icon:'📈', label:'Paras all-time avg', ...best(p=>p.allTimeAvg||0, v=>v+' pts/vuoro') },
-    { icon:'🎰', label:'Eniten 180-kierroksia', ...best(p=>p.total180s||0, v=>v+'×') },
-    { icon:'💯', label:'Eniten 100+ kierroksia', ...best(p=>p.total100plus||0, v=>v+'×') },
-    { icon:'🏆', label:'Eniten voittoja',    ...best(p=>p.wins||0, v=>v+' voittoa') },
-    { icon:'🔥', label:'Pisin voittoputki',  ...best(p=>p.maxStreak||0, v=>v+' peliä') },
-    { icon:'🎯', label:'Eniten pelejä',      ...best(p=>p.games||0, v=>v+' peliä') },
-    { icon:'🏹', label:'Eniten tikkoja heitetty', ...best(p=>(p.totalTurns||0)*3, v=>v+' tikkaa') },
-    { icon:'💀', label:'Eniten busteja',     ...best(p=>p.totalBusts||0, v=>v+' bustia') },
-    { icon:'👑', label:'Korkein voitto%',    ...best(p=>p.games>0?Math.round((p.wins||0)/p.games*100):0, v=>v+'%') },
-    { icon:'🥇', label:'Turnausvoittoja',    ...best(p=>p.tournamentWins||0, v=>v+'× voitto') },
-  ];
-
-  const cards = records.map(r=>`
-    <div style="background:rgba(22,22,34,0.75);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
-      <div style="font-size:28px;">${r.icon}</div>
-      <div style="flex:1;">
-        <div style="font-size:12px;color:var(--muted);letter-spacing:1px;">${r.label.toUpperCase()}</div>
-        <div style="font-size:15px;font-weight:700;margin-top:2px;color:${r.col||'var(--text)'};">${esc(r.name||'–')}</div>
-      </div>
-      <div style="font-family:var(--fd);font-size:22px;color:var(--accent);text-align:right;">${r.val}</div>
-    </div>`).join('');
-
-  // Total stats across all players
-  const totalDarts = players.reduce((s,p)=>s+(p.totalTurns||0)*3,0);
-  const total180s = players.reduce((s,p)=>s+(p.total180s||0),0);
-  const totalGames = players.reduce((s,p)=>s+(p.games||0),0);
-  const totalBusts = players.reduce((s,p)=>s+(p.totalBusts||0),0);
-
-  div.innerHTML = `
-    <div class="header">
-      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Ennätykset</div>
-    </div>
-    <div style="padding:12px 14px;">
-      <div style="background:rgba(0,232,122,0.08);border:1px solid rgba(0,232,122,0.2);border-radius:12px;padding:12px 16px;margin-bottom:14px;">
-        <div style="font-family:var(--fd);font-size:16px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;">KAIKKI PELAAJAT YHTEENSÄ</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          ${[['🏹 Tikkoja heitetty', totalDarts.toLocaleString()],['🎰 180-kierrokset', total180s],['🎮 Pelejä pelattu', totalGames],['💀 Busteja yhteensä', totalBusts]].map(([l,v])=>`
-            <div style="text-align:center;"><div style="font-family:var(--fd);font-size:22px;color:var(--text);">${v}</div><div style="font-size:11px;color:var(--muted);">${l}</div></div>`).join('')}
-        </div>
-      </div>
-      ${cards}
-    </div>
-  `;
   return div;
 }
 
