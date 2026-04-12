@@ -1996,11 +1996,11 @@ async function goStats() {
   chronological.forEach(g=>{
     if(!g.players)return;
     g.players.forEach(p=>{
+      const soloGame = (g.players||[]).length < 2;
       if(!st[p.id])st[p.id]={name:p.name,games:0,multiGames:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
       st[p.id].games++;
       if(!soloGame) st[p.id].multiGames++;
       st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
-      const soloGame = (g.players||[]).length < 2;
       const won = !soloGame && g.winner?.id===p.id;
       const lost = !soloGame && g.winner && g.winner.id!==p.id;
       if(won){ st[p.id].wins++; st[p.id].streak++; st[p.id].maxStreak=Math.max(st[p.id].maxStreak,st[p.id].streak); }
@@ -2868,9 +2868,23 @@ function checkForUpdate() {
     const dy = Math.abs(e.changedTouches[0].screenY - sy);
     if (dx > 80 && dy < 60) {
       const backMap = {
-        players: 'home', 'setup-type': 'home', 'setup-config': 'setup-type',
-        'setup-players': 'setup-config', history: 'home', stats: 'home',
-        gameover: 'home'
+        // Päävalikosta
+        players: 'home',
+        history: 'home',
+        stats: 'home',
+        leaderboard: 'home',
+        records: 'home',
+        'tournament-setup': 'home',
+        // Pelin asetukset
+        'setup-type': 'home',
+        'setup-config': 'setup-type',
+        'setup-players': 'setup-config',
+        // Pelin jälkeen
+        gameover: 'home',
+        // Alasivut
+        'history-detail': 'history',
+        'player-profile': 'players',
+        'tournament-bracket': 'tournament-setup',
       };
       const target = backMap[S.screen];
       if (target) nav(target);
