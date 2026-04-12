@@ -1714,7 +1714,7 @@ function endGame() {
 
   fbSaveGame({
     type:g.type,
-    winner:g.winner?{id:g.winner.id,name:g.winner.name}:null,
+    winner:g.players.length>=2&&g.winner?{id:g.winner.id,name:g.winner.name}:null,
     players:g.players.map(p=>({id:p.id,name:p.name})),
     checkoutMode:g.checkoutMode||null,
     cricketMode:g.cricketMode||null,
@@ -1725,7 +1725,9 @@ function endGame() {
   });
 
   // Update player profile stats in Firebase
-  if(g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
+  // Solo game = only 1 player → don't count as a win
+  const isSolo = g.players.length < 2;
+  if(!isSolo && g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
   g.players.forEach(gp=>{
     const p=S.players.find(p=>p.id===gp.id);
     if(p){
@@ -1739,7 +1741,7 @@ function endGame() {
     tournamentMatchDone(g.winner.id);
   } else {
     nav('gameover');
-    setTimeout(launchConfetti,300);
+    if(!isSolo) setTimeout(launchConfetti,300);
   }
 }
 
@@ -1757,6 +1759,7 @@ function calcTurnStats(g) {
 
 function renderGameOver() {
   const g=S.game; const w=g?.winner;
+  const isSolo = (g?.players?.length||0) < 2;
   const gName=GAMES.find(t=>t.id===g?.type)?.name||g?.type||'?';
   const dur=g?.endTime?fmtDuration(Math.round((g.endTime-g.startTime)/1000)):'';
   const ts=calcTurnStats(g);
@@ -1771,7 +1774,9 @@ function renderGameOver() {
   const playerRows=g?.players?g.players.map(p=>'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px;"><span style="color:'+(p.id===w?.id?'var(--gold)':'var(--text)')+';">'+(p.id===w?.id?'&#127942; ':'')+esc(p.name)+'</span>'+(isX01?'<span style="color:var(--muted);">'+p.score+' jäljellä</span>':'')+'</div>').join(''):'';
   div.innerHTML='<div class="gameover-screen" style="overflow-y:auto;justify-content:flex-start;padding-top:28px;">'
     +'<div style="font-size:80px;margin-bottom:10px;">&#127942;</div>'
-    +'<div class="winner-label">Voittaja</div>'
+      +(isSolo
+    ? '<div class="winner-label" style="color:var(--accent);">PELI VALMIS!</div><div class="winner-name" style="font-size:40px;color:var(--accent);">'+fmtDuration(Math.round(((g?.endTime||Date.now())-g.startTime)/1000))+'</div>'
+    : '<div class="winner-label">Voittaja</div><div class="winner-name">'+esc(w?.name||'?')+'</div>')
     +'<div class="winner-name">'+esc(w?.name||'?')+'</div>'
     +'<div style="margin-top:8px;font-size:13px;color:var(--muted);">'+gName+(dur?' &middot; '+dur:'')+'</div>'
     +(ts?'<div style="width:100%;max-width:340px;margin-top:14px;">'+statsHtml+'</div>':'')
@@ -1820,7 +1825,7 @@ function renderHistory() {
             <button onclick="event.stopPropagation();deleteGame('${g.id}')" style="background:none;border:1px solid var(--red);color:var(--red);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;">✕</button>
           </div>
         </div>
-        ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:''}
+        ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:((g.players||[]).length<2?'<div style="font-size:13px;color:var(--accent);">🎯 Solo-peli</div>':'')}
         <div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>
         ${g.duration?`<div style="font-size:11px;color:var(--muted);margin-top:3px;">⏱ ${fmtDuration(g.duration)}</div>`:''}
         <div style="font-size:11px;color:var(--muted);margin-top:4px;">Klikkaa nähdäksesi tiedot ›</div>
@@ -1913,9 +1918,12 @@ async function goStats() {
       if(!st[p.id])st[p.id]={name:p.name,games:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
       st[p.id].games++;
       st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
-      const won = g.winner?.id===p.id;
+      const soloGame = (g.players||[]).length < 2;
+      const won = !soloGame && g.winner?.id===p.id;
+      const lost = !soloGame && g.winner && g.winner.id!==p.id;
       if(won){ st[p.id].wins++; st[p.id].streak++; st[p.id].maxStreak=Math.max(st[p.id].maxStreak,st[p.id].streak); }
-      else { st[p.id].streak=0; }
+      else if(lost) { st[p.id].streak=0; }
+      // Solo games don't affect streak
       if(st[p.id].last10.length<10) st[p.id].last10.push(won?1:0);
       // Merge per-game stats
       const ps = g.playerStats?.[p.id];
