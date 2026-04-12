@@ -1998,9 +1998,10 @@ async function goStats() {
     if(!g.players)return;
     g.players.forEach(p=>{
       const soloGame = (g.players||[]).length < 2;
-      if(!st[p.id])st[p.id]={name:p.name,games:0,multiGames:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
+      if(!st[p.id])st[p.id]={name:p.name,games:0,multiGames:0,soloGames:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
       st[p.id].games++;
       if(!soloGame) st[p.id].multiGames++;
+      else st[p.id].soloGames++;
       st[p.id].types[g.type]=(st[p.id].types[g.type]||0)+1;
       const won = !soloGame && g.winner?.id===p.id;
       const lost = !soloGame && g.winner && g.winner.id!==p.id;
@@ -2043,28 +2044,37 @@ function renderStats() {
     const maxG=Math.max(1,...sorted.map(s=>s.games));
     const mkBar=(items,val,col,sfx)=>'<div class="bar-container">'+items.map(s=>{const pct=Math.round(val(s)/Math.max(1,...items.map(val))*100);return '<div class="bar-row"><div class="bar-label">'+esc(s.name)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+(typeof col==='function'?col(s):col)+';">'+sfx(s)+'</div></div></div>';}).join('')+'</div>';
     const barWin='<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">Voitto%</div>'+mkBar(sorted,s=>s.multiGames>0?Math.round(s.wins/s.multiGames*100):0,s=>{const p=s.games>0?Math.round(s.wins/s.games*100):0;return p>=60?'var(--accent)':p>=35?'var(--gold)':'var(--muted)';},s=>(s.multiGames>0?Math.round(s.wins/s.multiGames*100):0)+'%')+'</div>';
-    const barG='<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">Pelejä pelattu</div>'+mkBar(sorted,s=>s.games,'var(--blue)',s=>s.games)+'</div>';
+    const barMulti='<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">⚔️ Moninpelejä pelattu</div>'+mkBar(sorted,s=>s.multiGames||0,'var(--blue)',s=>s.multiGames||0)+'</div>';
+    const barSolo=sorted.some(s=>s.soloGames>0)?'<div class="stat-card" style="margin-bottom:12px;"><div class="stat-name">🎯 Solo-pelejä pelattu</div>'+mkBar(sorted,s=>s.soloGames||0,'var(--muted)',s=>s.soloGames||0)+'</div>':'';
     const cards=sorted.map((s,si)=>{
       const col=playerColor(si);
       const last10bars=s.last10.map(w=>`<div style="flex:1;height:${w?'100%':'40%'};background:${w?col.bg:'var(--border)'};border-radius:3px 3px 0 0;align-self:flex-end;min-height:6px;transition:height 0.4s;"></div>`).join('');
       const streakEmoji=s.streak>=3?'🔥':s.streak>=2?'✨':'';
       return `<div class="stat-card" style="border-left:3px solid ${col.bg};">
-        <div class="stat-name" style="color:${col.bg};">${esc(s.name)}</div>
-        <div class="stat-row"><span>Pelattu</span><span class="stat-val">${s.games}</span></div>
-        <div class="stat-row"><span>Voitot</span><span class="stat-val">${s.wins}</span></div>
+        <div      <div class="stat-name" style="color:${col.bg};">${esc(s.name)}</div>
+
+        <div style="font-size:11px;color:var(--accent);letter-spacing:2px;margin:8px 0 4px;">⚔️ MONINPELI</div>
+        <div class="stat-row"><span>Pelattu</span><span class="stat-val">${s.multiGames||0} peliä</span></div>
+        <div class="stat-row"><span>Voitot</span><span class="stat-val">${s.wins||0}</span></div>
         <div class="stat-row"><span>Voitto%</span><span class="stat-val">${s.multiGames>0?Math.round(s.wins/s.multiGames*100):0}%</span></div>
-        <div class="stat-row"><span>Voittoputki</span><span class="stat-val">${s.streak} ${streakEmoji}</span></div>
-        <div class="stat-row"><span>Paras putki</span><span class="stat-val">${s.maxStreak}</span></div>
+        <div class="stat-row"><span>Voittoputki</span><span class="stat-val">${s.streak||0} ${streakEmoji}</span></div>
+        <div class="stat-row"><span>Paras putki</span><span class="stat-val">${s.maxStreak||0}</span></div>
+
+        ${(s.soloGames||0)>0?`<div style="font-size:11px;color:var(--muted);letter-spacing:2px;margin:10px 0 4px;">🎯 SOLO</div>
+        <div class="stat-row"><span>Solo-pelejä</span><span class="stat-val">${s.soloGames}</span></div>`:''}
+
+        <div style="font-size:11px;color:var(--muted);letter-spacing:2px;margin:10px 0 4px;">📊 HEITTOTILASTOT</div>
         ${s.allTimeAvg?`<div class="stat-row"><span>All-time avg</span><span class="stat-val">${s.allTimeAvg}</span></div>`:''}
         ${s.bestTurn?`<div class="stat-row"><span>Paras vuoro</span><span class="stat-val">${s.bestTurn} pts</span></div>`:''}
         ${s.bestCheckout?`<div class="stat-row"><span>Korkein checkout</span><span class="stat-val">${s.bestCheckout} pts</span></div>`:''}
         ${s.total180?`<div class="stat-row"><span>180-kierrokset</span><span class="stat-val">x${s.total180} 🎯</span></div>`:''}
         <div class="stat-row"><span>Suosikkipeli</span><span class="stat-val">${Object.entries(s.types).sort((a,b)=>b[1]-a[1])[0]?.[0]||'–'}</span></div>
-        ${s.last10.length>0?`<div style="margin-top:10px;"><div style="font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:1px;">VIIMEISET ${s.last10.length} PELIÄ</div>
+
+        ${s.last10.length>0?`<div style="margin-top:10px;"><div style="font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:1px;">VIIMEISET ${s.last10.length} MONINPELIÄ</div>
         <div style="display:flex;gap:3px;height:32px;align-items:flex-end;">${last10bars}</div></div>`:''}
       </div>`;
     }).join('');
-    content=`<div class="stats-grid">${barWin}${barG}${cards}</div>`;
+    content=`<div class="stats-grid">${barWin}${barMulti}${barSolo}${cards}</div>`;
   }
   div.innerHTML=`
     <div class="header">
