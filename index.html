@@ -36,7 +36,7 @@
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 html,body { height:100%; background:var(--bg); color:var(--text); font-family:var(--fu); overflow:hidden; }
-#app { height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; }
+#app { height:100vh; height:calc(var(--app-h,100vh)); display:flex; flex-direction:column; overflow:hidden; }
 .screen { flex:1; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; }
 
 .header {
@@ -56,7 +56,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .home-logo .dart { font-size:60px; display:block; margin-bottom:6px; }
 .home-logo h1 { font-family:var(--fd); font-size:56px; letter-spacing:6px; color:var(--accent); text-shadow:0 0 40px rgba(0,232,122,0.35); }
 .home-logo p { color:var(--muted); font-size:12px; letter-spacing:3px; text-transform:uppercase; margin-top:4px; }
-.home-menu { padding:16px; display:flex; flex-direction:column; gap:10px; }
+.home-menu { padding:16px 16px 32px; display:flex; flex-direction:column; gap:10px; }
 .menu-btn {
   background:rgba(22,22,34,0.75); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
   border:1px solid rgba(255,255,255,0.08); color:var(--text);
@@ -162,18 +162,6 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .dart-chip.double { color:var(--blue); border-color:rgba(68,136,255,0.4); }
 .dart-chip.bull { color:var(--gold); border-color:rgba(255,215,0,0.4); }
 
-/* FLYING DART ANIMATION */
-.dart-fly {
-  position:fixed; pointer-events:none; z-index:200;
-  font-size:28px; line-height:1;
-  animation:dartFly 0.5s cubic-bezier(.2,0,.8,1) forwards;
-}
-@keyframes dartFly {
-  0%   { transform:translate(0,0) rotate(-45deg) scale(1.2); opacity:1; }
-  60%  { transform:translate(-40px,-80px) rotate(-45deg) scale(0.9); opacity:1; }
-  100% { transform:translate(-60px,-140px) rotate(-45deg) scale(0.4); opacity:0; }
-}
-
 .input-area { flex:1; display:flex; flex-direction:column; padding:5px 6px; gap:5px; overflow:hidden; min-height:0; }
 .modifier-row { display:flex; gap:7px; flex-shrink:0; }
 .mod-btn {
@@ -254,7 +242,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .loader { display:flex; align-items:center; justify-content:center; padding:40px; color:var(--muted); font-size:14px; }
 
 /* LOGIN */
-.login-screen { height:100vh; height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 24px; background:var(--bg); }
+.login-screen { height:100vh; height:calc(var(--app-h,100vh)); display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 24px; background:var(--bg); }
 .login-logo { font-size:64px; margin-bottom:8px; }
 .login-title { font-family:var(--fd); font-size:52px; letter-spacing:6px; color:var(--accent); text-shadow:0 0 40px rgba(0,232,122,0.35); margin-bottom:4px; }
 .login-sub { font-size:12px; color:var(--muted); letter-spacing:3px; margin-bottom:36px; }
@@ -273,11 +261,11 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
   100% { transform:translateY(0) scale(1); opacity:1; }
 }
 .score-drop { animation:scoreDrop 0.36s cubic-bezier(.22,1,.36,1) both; }
-@keyframes neon-pulse {
-  0%,100% { box-shadow:0 0 6px 1px var(--neon-col,rgba(0,232,122,0.6)), inset 0 0 6px rgba(0,232,122,0.1); }
-  50%      { box-shadow:0 0 16px 4px var(--neon-col,rgba(0,232,122,0.4)), inset 0 0 10px rgba(0,232,122,0.15); }
+@keyframes pulse-glow {
+  0%,100% { box-shadow:0 0 0 0 rgba(0,232,122,0.45); }
+  50%      { box-shadow:0 0 0 7px rgba(0,232,122,0); }
 }
-.tab-active-pulse { animation:neon-pulse 2s ease infinite; }
+.tab-active-pulse { animation:pulse-glow 2s ease infinite; }
 .confetti-piece { position:fixed; top:-14px; border-radius:2px; z-index:9999; pointer-events:none; animation:confettiFall linear forwards; }
 @keyframes confettiFall { 0%{transform:translateY(0) rotate(0deg);opacity:1;} 85%{opacity:1;} 100%{transform:translateY(110vh) rotate(700deg);opacity:0;} }
 .bar-container { margin-top:8px; }
@@ -366,6 +354,7 @@ async function logout() {
 function renderLoginScreen() {
   const app = document.getElementById('app');
   app.innerHTML = '';
+  setTimeout(setAppHeight, 100);
   const div = document.createElement('div');
   div.className = 'login-screen';
   div.innerHTML = `
@@ -510,13 +499,8 @@ async function fbUpdatePlayerProfile(id, wins, games, gs) {
     const hmKeys = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,'BULL','MISS'];
     hmKeys.forEach(k=>{ mergedHm[k]=(curHm[k]||0)+(newHm[k]||0); });
 
-    // Calculate streak
-    let streak = cur.streak||0;
-    if(wins > (cur.wins||0)) { streak++; } else if(games > (cur.games||0) && wins === (cur.wins||0)) { streak = 0; }
-    const maxStreak = Math.max(cur.maxStreak||0, streak);
-
     const update = {
-      wins, games, streak, maxStreak,
+      wins, games,
       totalTurns: (cur.totalTurns||0) + (gs.turns||0),
       totalBusts: (cur.totalBusts||0) + (gs.busts||0),
       total180s: (cur.total180s||0) + (gs.s180||0),
@@ -532,20 +516,6 @@ async function fbUpdatePlayerProfile(id, wins, games, gs) {
       allTimeAvgSum: (cur.allTimeAvgSum||0) + (gs.avg||0)*(gs.turns||0),
       heatmap: mergedHm,
     };
-    // Check achievements
-    const newAchievements = checkAchievements(update, cur);
-    if(newAchievements.length > 0) {
-      update.achievements = [...(cur.achievements||[]), ...newAchievements];
-      // Show toast for each new achievement
-      newAchievements.forEach(aid => {
-        const a = ACHIEVEMENTS.find(x=>x.id===aid);
-        if(a) setTimeout(()=>showToast('🎖️ Saavutus: '+a.name, 'success'), 1500);
-      });
-    }
-    // Add max streak for achievement check
-    if(update.wins > (cur.wins||0)) {
-      update.maxStreak = Math.max(cur.maxStreak||0, update.streak||0);
-    }
     await db.collection('darts_players').doc(id).update(update);
   } catch(e) { console.error('fbUpdatePlayerProfile:', e); }
 }
@@ -570,41 +540,6 @@ function playerColorForId(players, id) {
   const idx = players.findIndex(p=>p.id===id);
   return idx>=0 ? playerColor(idx) : PLAYER_COLORS[0];
 }
-// ==================== ACHIEVEMENTS ====================
-const ACHIEVEMENTS = [
-  { id:'first_game',    icon:'🎯', name:'Ensimmäinen peli',     desc:'Pelaa ensimmäinen peli',           check: p => (p.games||0) >= 1 },
-  { id:'games_10',      icon:'🔟', name:'10 peliä',             desc:'Pelaa 10 peliä',                   check: p => (p.games||0) >= 10 },
-  { id:'games_50',      icon:'💪', name:'50 peliä',             desc:'Pelaa 50 peliä',                   check: p => (p.games||0) >= 50 },
-  { id:'games_100',     icon:'💯', name:'100 peliä',            desc:'Pelaa 100 peliä',                  check: p => (p.games||0) >= 100 },
-  { id:'first_win',     icon:'🏆', name:'Ensimmäinen voitto',   desc:'Voita ensimmäinen peli',           check: p => (p.wins||0) >= 1 },
-  { id:'wins_10',       icon:'👑', name:'10 voittoa',           desc:'Voita 10 peliä',                   check: p => (p.wins||0) >= 10 },
-  { id:'wins_50',       icon:'🌟', name:'50 voittoa',           desc:'Voita 50 peliä',                   check: p => (p.wins||0) >= 50 },
-  { id:'streak_3',      icon:'🔥', name:'Kolmen putki',         desc:'3 voittoa peräkkäin',              check: p => (p.maxStreak||0) >= 3 },
-  { id:'streak_5',      icon:'🔥🔥','name':'5 pelin putki',     desc:'5 voittoa peräkkäin',              check: p => (p.maxStreak||0) >= 5 },
-  { id:'streak_10',     icon:'💥', name:'10 pelin putki',       desc:'10 voittoa peräkkäin',             check: p => (p.maxStreak||0) >= 10 },
-  { id:'first_180',     icon:'🎰', name:'180!',                 desc:'Heitä 180 pistettä yhdellä vuorolla', check: p => (p.total180s||0) >= 1 },
-  { id:'s180_5',        icon:'🎰🎰','name':'5× 180',           desc:'Heitä 180 viisi kertaa',           check: p => (p.total180s||0) >= 5 },
-  { id:'checkout_100',  icon:'✅', name:'100+ checkout',        desc:'Lopeta peli 100+ checkoutilla',    check: p => (p.bestCheckout||0) >= 100 },
-  { id:'checkout_140',  icon:'⚡', name:'140+ checkout',        desc:'Lopeta peli 140+ checkoutilla',    check: p => (p.bestCheckout||0) >= 140 },
-  { id:'checkout_170',  icon:'🚀', name:'170 checkout',         desc:'Korkein mahdollinen checkout',     check: p => (p.bestCheckout||0) >= 170 },
-  { id:'avg_50',        icon:'📈', name:'Avg 50+',              desc:'All-time avg yli 50',              check: p => (p.allTimeAvg||0) >= 50 },
-  { id:'avg_70',        icon:'📈📈','name':'Avg 70+',           desc:'All-time avg yli 70',              check: p => (p.allTimeAvg||0) >= 70 },
-  { id:'best_turn_100', icon:'💣', name:'100+ vuoro',           desc:'Heitä yli 100 yhdellä vuorolla',  check: p => (p.bestTurn||0) >= 100 },
-  { id:'best_turn_140', icon:'💣💣','name':'140+ vuoro',        desc:'Heitä yli 140 yhdellä vuorolla',  check: p => (p.bestTurn||0) >= 140 },
-  { id:'darts_1000',    icon:'🏹', name:'1000 tikkaa',          desc:'Heitä 1000 tikkaa yhteensä',      check: p => ((p.totalTurns||0)*3) >= 1000 },
-  { id:'darts_10000',   icon:'🏹🏹','name':'10000 tikkaa',      desc:'Heitä 10000 tikkaa yhteensä',     check: p => ((p.totalTurns||0)*3) >= 10000 },
-  { id:'tournament_win',icon:'🥇', name:'Turnausvoittaja',      desc:'Voita turnaus',                    check: p => (p.tournamentWins||0) >= 1 },
-];
-
-function checkAchievements(player, prevData) {
-  const newOnes = [];
-  const already = prevData.achievements || [];
-  ACHIEVEMENTS.forEach(a => {
-    if(!already.includes(a.id) && a.check(player)) newOnes.push(a.id);
-  });
-  return newOnes;
-}
-
 const GAMES = [
   { id:'501',        name:'501',              icon:'🎯', desc:'Suosituin kilpailupeli. Lopeta tuplaan.', hot:true },
   { id:'301',        name:'301',              icon:'🎯', desc:'Nopeampi versio. Sama säännöt kuin 501.', hot:true },
@@ -689,6 +624,7 @@ function nav(screen, extra={}) {
 }
 
 function render() {
+  setAppHeight && setAppHeight();
   const app = document.getElementById('app');
   const fns = {
     home: renderHome, players: renderPlayers,
@@ -697,7 +633,6 @@ function render() {
     game: renderGame, gameover: renderGameOver,
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
     'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
-    records: renderRecords, leaderboard: renderLeaderboard,
     'player-profile': renderPlayerProfile,
   };
   const fn = fns[S.screen];
@@ -735,12 +670,6 @@ function renderHome() {
       </button>
       <button class="menu-btn" onclick="nav('tournament-setup')" style="border-color:rgba(255,215,0,0.3);">
         <span class="icon">&#127942;</span><span class="label">Turnaus</span><span class="arrow" style="color:var(--gold);">›</span>
-      </button>
-      <button class="menu-btn" onclick="goLeaderboard()" style="border-color:rgba(68,136,255,0.3);">
-        <span class="icon">&#127942;</span><span class="label">Leaderboard</span><span class="arrow" style="color:var(--blue);">›</span>
-      </button>
-      <button class="menu-btn" onclick="goRecords()" style="border-color:rgba(255,165,0,0.3);">
-        <span class="icon">&#9971;</span><span class="label">Ennätykset</span><span class="arrow" style="color:var(--gold);">›</span>
       </button>
       <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
         <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
@@ -1064,8 +993,7 @@ function renderX01() {
       flex:1; text-align:center; padding:7px 6px;
       background:${isActive?col.bg+'22':'rgba(255,255,255,0.02)'};
       border-bottom:3px solid ${isActive?col.bg:'rgba(255,255,255,0.08)'};
-      min-width:80px; transition:all 0.2s;
-      ${isActive?'--neon-col:'+col.bg+'99;animation:neon-pulse 2s ease infinite;':''}">
+      min-width:80px; transition:all 0.2s;">
       <div style="font-family:var(--fd);font-size:${isActive?'17':'14'}px;color:${isActive?col.bg:'#7070a0'};letter-spacing:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(pl.name).toUpperCase()}</div>
       <div style="font-family:var(--fd);font-size:${isActive?'30':'24'}px;color:${isActive?'#fff':'#5a5a8a'};line-height:1.1;">${pl.score}</div>
       ${g.legsToWin>1?`<div style="font-size:11px;color:${isActive?col.bg:'var(--muted)'};">${'●'.repeat(pl.legsWon||0)}${'○'.repeat(Math.max(0,(g.legsToWin||1)-(pl.legsWon||0)))} erät</div>`:''}
@@ -1085,8 +1013,8 @@ function renderX01() {
 
   const modT = g.modifier==='T', modD = g.modifier==='D';
   let nums = '';
-  for(let n=1;n<=20;n++) nums+=`<button class="num-btn" onclick="x01Dart(${n},this)">${n}</button>`;
-  nums += `<button class="num-btn bull-btn" onclick="x01Bull(this)">BULL<br><small style="font-family:var(--fu);font-size:10px;font-weight:400;">${modD?'50':'25/50'}</small></button>`;
+  for(let n=1;n<=20;n++) nums+=`<button class="num-btn" onclick="x01Dart(${n})">${n}</button>`;
+  nums += `<button class="num-btn bull-btn" onclick="x01Bull()">BULL<br><small style="font-family:var(--fu);font-size:10px;font-weight:400;">${modD?'50':'25/50'}</small></button>`;
   nums += `<button class="num-btn next-btn" onclick="x01Next()">SEURAAVA ›</button>`;
 
   const subLabel = g.modifier
@@ -1143,10 +1071,9 @@ function x01Dart(num) {
   processX01(dart);
 }
 
-function x01Bull(el) {
+function x01Bull() {
   const g = S.game;
   if (g.currentDarts.length>=3||g.gameOver) return;
-  flyDart(el);
   const dart = g.modifier==='D' ? 'BULL' : '25';
   g.modifier = null;
   processX01(dart);
@@ -2199,12 +2126,7 @@ function tournamentMatchDone(winnerId) {
   const roundMatches=t.bracket[t.round];
   if(roundMatches.every(m=>m.winner)){
     const winners=roundMatches.map(m=>m.winner);
-    if(winners.length===1){
-      t.done=true; t.champion=winners[0];
-      // Save tournament to Firebase + update winner stats
-      saveTournamentToFirebase(t);
-      nav('tournament-bracket'); return;
-    }
+    if(winners.length===1){ t.done=true; t.champion=winners[0]; nav('tournament-bracket'); return; }
     const nextRound=[];
     for(let i=0;i<winners.length;i+=2){
       nextRound.push({p1:winners[i],p2:winners[i+1]||'bye',winner:winners[i+1]?null:winners[i],round:t.round+1,idx:nextRound.length});
@@ -2213,40 +2135,6 @@ function tournamentMatchDone(winnerId) {
     advanceByes();
   }
   nav('tournament-bracket');
-}
-
-async function saveTournamentToFirebase(t) {
-  if(!db) return;
-  try {
-    const pName = id => S.players.find(p=>p.id===id)?.name||'?';
-    await db.collection('darts_tournaments').add({
-      champion: t.champion ? {id:t.champion, name:pName(t.champion)} : null,
-      players: (t.players||[]).map(id=>({id,name:pName(id)})),
-      gameType: t.gameType||'501',
-      rounds: t.bracket?.length||0,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    // Update winner's tournament wins
-    if(t.champion && db) {
-      const doc = await db.collection('darts_players').doc(t.champion).get();
-      const cur = doc.exists?doc.data():{};
-      const tWins = (cur.tournamentWins||0)+1;
-      await db.collection('darts_players').doc(t.champion).update({tournamentWins: tWins});
-      // Check tournament achievement
-      const p2 = S.players.find(x=>x.id===t.champion);
-      if(p2) {
-        p2.tournamentWins = tWins;
-        const newA = checkAchievements({...cur,tournamentWins:tWins}, cur);
-        if(newA.length) {
-          await db.collection('darts_players').doc(t.champion).update({
-            achievements:[...(cur.achievements||[]),...newA]
-          });
-          newA.forEach(aid=>{const a=ACHIEVEMENTS.find(x=>x.id===aid);if(a)setTimeout(()=>showToast('🎖️ '+a.name,'success'),2000);});
-        }
-      }
-    }
-    showToast('Turnaus tallennettu ✓','success');
-  } catch(e) { console.error('saveTournament:',e); }
 }
 
 function renderTournamentBracket() {
@@ -2481,181 +2369,13 @@ function renderPlayerProfile() {
           <div class="gstat-title">Pelihistoria</div>
           ${recentGames}
         </div>` : ''}
-        ${(()=>{
-          const ach = p.achievements||[];
-          if(!ach.length) return '<div class="stat-card" style="margin-bottom:12px;"><div class="gstat-title">🎖️ Saavutukset</div><div style="color:var(--muted);font-size:13px;padding:4px 0;">Ei saavutuksia vielä – pelaa lisää!</div></div>';
-          const badges = ACHIEVEMENTS.map(a=>{
-            const earned = ach.includes(a.id);
-            return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);opacity:${earned?1:0.3};">
-              <div style="font-size:22px;">${a.icon}</div>
-              <div style="flex:1;"><div style="font-size:14px;font-weight:600;color:${earned?'var(--text)':'var(--muted)'};">${a.name}</div>
-              <div style="font-size:11px;color:var(--muted);">${a.desc}</div></div>
-              ${earned?'<div style="color:var(--accent);font-size:16px;">✓</div>':''}
-            </div>`;
-          }).join('');
-          const count = ach.length;
-          return `<div class="stat-card" style="margin-bottom:12px;">
-            <div class="gstat-title">🎖️ Saavutukset (${count}/${ACHIEVEMENTS.length})</div>
-            <div style="background:var(--card2);border-radius:6px;height:6px;margin-bottom:10px;overflow:hidden;">
-              <div style="width:${Math.round(count/ACHIEVEMENTS.length*100)}%;height:100%;background:var(--accent);border-radius:6px;"></div>
-            </div>
-            ${badges}
-          </div>`;
-        })()}
       </div>
-    </div>
-  `;
-  return div;
-}
-
-// ==================== LEADERBOARD ====================
-async function goLeaderboard() {
-  nav('leaderboard');
-  if(!db) return;
-  try {
-    const snap = await db.collection('darts_players').get();
-    S.leaderboardData = snap.docs.map(d=>({id:d.id,...d.data()}));
-    S.leaderboardSort = S.leaderboardSort || 'wins';
-    render();
-  } catch(e) { console.error(e); }
-}
-
-function renderLeaderboard() {
-  const div = el('div','screen');
-  const players = (S.leaderboardData||[]);
-  const sort = S.leaderboardSort || 'wins';
-
-  const sorted = [...players].filter(p=>p.games>0).sort((a,b)=>{
-    if(sort==='wins') return (b.wins||0)-(a.wins||0);
-    if(sort==='winpct') return ((b.wins||0)/(b.games||1))-((a.wins||0)/(a.games||1));
-    if(sort==='avg') return (b.allTimeAvg||0)-(a.allTimeAvg||0);
-    if(sort==='games') return (b.games||0)-(a.games||0);
-    if(sort==='streak') return (b.maxStreak||0)-(a.maxStreak||0);
-    return 0;
-  });
-
-  const medals = ['🥇','🥈','🥉'];
-  const rows = sorted.map((p,i)=>{
-    const col = playerColor(S.players.findIndex(x=>x.id===p.id));
-    const winPct = p.games>0?Math.round((p.wins||0)/p.games*100):0;
-    return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(22,22,34,0.75);backdrop-filter:blur(10px);border:1px solid ${i<3?col.bg+'44':'var(--border)'};border-radius:12px;margin-bottom:7px;${i===0?'border-width:2px;':''}">
-      <div style="font-size:${i<3?'24':'18'}px;min-width:32px;text-align:center;">${medals[i]||'#'+(i+1)}</div>
-      <div style="width:36px;height:36px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:18px;flex-shrink:0;">${p.name?.[0]?.toUpperCase()||'?'}</div>
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:16px;font-weight:700;color:${col.bg};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name||'?')}</div>
-        <div style="font-size:11px;color:var(--muted);">${p.games||0} peliä · avg ${p.allTimeAvg||0} · putki ${p.maxStreak||0}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0;">
-        <div style="font-family:var(--fd);font-size:22px;color:${sort==='winpct'?'var(--gold)':sort==='avg'?'var(--blue)':'var(--accent)'};">${
-          sort==='wins'?p.wins||0:
-          sort==='winpct'?winPct+'%':
-          sort==='avg'?p.allTimeAvg||0:
-          sort==='games'?p.games||0:
-          p.maxStreak||0
-        }</div>
-        <div style="font-size:10px;color:var(--muted);">${sort==='wins'?'voittoa':sort==='winpct'?'voitto%':sort==='avg'?'avg':sort==='games'?'peliä':'putki'}</div>
-      </div>
-    </div>`;
-  }).join('');
-
-  const sortBtn = (id,label) => `<button onclick="S.leaderboardSort='${id}';goLeaderboard()" style="padding:7px 12px;border-radius:8px;font-family:var(--fu);font-size:13px;font-weight:600;cursor:pointer;border:1px solid ${sort===id?'var(--accent)':'var(--border)'};background:${sort===id?'var(--accent)':'var(--card)'};color:${sort===id?'#000':'var(--text)'};">${label}</button>`;
-
-  div.innerHTML = `
-    <div class="header">
-      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Leaderboard</div>
-    </div>
-    <div style="padding:10px 14px 6px;display:flex;gap:6px;flex-wrap:wrap;">
-      ${sortBtn('wins','Voitot')}${sortBtn('winpct','Voitto%')}${sortBtn('avg','Avg')}${sortBtn('games','Pelattu')}${sortBtn('streak','Putki')}
-    </div>
-    <div style="padding:0 14px 20px;">${rows||'<div class="empty-state"><span class="ei">📋</span><p>Ei pelaajia vielä.</p></div>'}</div>
-  `;
-  return div;
-}
-
-// ==================== RECORDS ====================
-async function goRecords() {
-  nav('records');
-  if(!db) return;
-  try {
-    const snap = await db.collection('darts_players').get();
-    S.recordsData = snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.games>0);
-    render();
-  } catch(e) { console.error(e); }
-}
-
-function renderRecords() {
-  const div = el('div','screen');
-  const players = S.recordsData || [];
-
-  function best(fn, fmt) {
-    if(!players.length) return {name:'–',val:'–'};
-    const p = players.reduce((a,b)=>fn(a)>=fn(b)?a:b);
-    return {name:p.name, val:fmt(fn(p)), col:playerColor(S.players.findIndex(x=>x.id===p.id)).bg};
-  }
-
-  const records = [
-    { icon:'⚡', label:'Korkein checkout',   ...best(p=>p.bestCheckout||0, v=>v+' pts') },
-    { icon:'💥', label:'Paras yksittäinen vuoro', ...best(p=>p.bestTurn||0, v=>v+' pts') },
-    { icon:'📈', label:'Paras all-time avg', ...best(p=>p.allTimeAvg||0, v=>v+' pts/vuoro') },
-    { icon:'🎰', label:'Eniten 180-kierroksia', ...best(p=>p.total180s||0, v=>v+'×') },
-    { icon:'💯', label:'Eniten 100+ kierroksia', ...best(p=>p.total100plus||0, v=>v+'×') },
-    { icon:'🏆', label:'Eniten voittoja',    ...best(p=>p.wins||0, v=>v+' voittoa') },
-    { icon:'🔥', label:'Pisin voittoputki',  ...best(p=>p.maxStreak||0, v=>v+' peliä') },
-    { icon:'🎯', label:'Eniten pelejä',      ...best(p=>p.games||0, v=>v+' peliä') },
-    { icon:'🏹', label:'Eniten tikkoja heitetty', ...best(p=>(p.totalTurns||0)*3, v=>v+' tikkaa') },
-    { icon:'💀', label:'Eniten busteja',     ...best(p=>p.totalBusts||0, v=>v+' bustia') },
-    { icon:'👑', label:'Korkein voitto%',    ...best(p=>p.games>0?Math.round((p.wins||0)/p.games*100):0, v=>v+'%') },
-    { icon:'🥇', label:'Turnausvoittoja',    ...best(p=>p.tournamentWins||0, v=>v+'× voitto') },
-  ];
-
-  const cards = records.map(r=>`
-    <div style="background:rgba(22,22,34,0.75);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:14px;">
-      <div style="font-size:28px;">${r.icon}</div>
-      <div style="flex:1;">
-        <div style="font-size:12px;color:var(--muted);letter-spacing:1px;">${r.label.toUpperCase()}</div>
-        <div style="font-size:15px;font-weight:700;margin-top:2px;color:${r.col||'var(--text)'};">${esc(r.name||'–')}</div>
-      </div>
-      <div style="font-family:var(--fd);font-size:22px;color:var(--accent);text-align:right;">${r.val}</div>
-    </div>`).join('');
-
-  // Total stats across all players
-  const totalDarts = players.reduce((s,p)=>s+(p.totalTurns||0)*3,0);
-  const total180s = players.reduce((s,p)=>s+(p.total180s||0),0);
-  const totalGames = players.reduce((s,p)=>s+(p.games||0),0);
-  const totalBusts = players.reduce((s,p)=>s+(p.totalBusts||0),0);
-
-  div.innerHTML = `
-    <div class="header">
-      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Ennätykset</div>
-    </div>
-    <div style="padding:12px 14px;">
-      <div style="background:rgba(0,232,122,0.08);border:1px solid rgba(0,232,122,0.2);border-radius:12px;padding:12px 16px;margin-bottom:14px;">
-        <div style="font-family:var(--fd);font-size:16px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;">KAIKKI PELAAJAT YHTEENSÄ</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          ${[['🏹 Tikkoja heitetty', totalDarts.toLocaleString()],['🎰 180-kierrokset', total180s],['🎮 Pelejä pelattu', totalGames],['💀 Busteja yhteensä', totalBusts]].map(([l,v])=>`
-            <div style="text-align:center;"><div style="font-family:var(--fd);font-size:22px;color:var(--text);">${v}</div><div style="font-size:11px;color:var(--muted);">${l}</div></div>`).join('')}
-        </div>
-      </div>
-      ${cards}
     </div>
   `;
   return div;
 }
 
 // ==================== HELPERS ====================
-function flyDart(el) {
-  if(!el) return;
-  const rect = el.getBoundingClientRect();
-  const dart = document.createElement('div');
-  dart.className = 'dart-fly';
-  dart.textContent = '🎯';
-  dart.style.left = (rect.left + rect.width/2 - 14) + 'px';
-  dart.style.top = (rect.top + rect.height/2 - 14) + 'px';
-  document.body.appendChild(dart);
-  dart.addEventListener('animationend', () => dart.remove());
-}
 function animateScore(fromVal, toVal, mode) {
   const sc = document.getElementById('cscore');
   if(!sc) return;
@@ -2711,7 +2431,36 @@ async function init() {
     render();
   });
 }
-window.addEventListener("load", init);
+// ========== VIEWPORT HEIGHT FIX ==========
+function setAppHeight() {
+  // Use visualViewport if available (most accurate on mobile)
+  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+
+setAppHeight();
+window.addEventListener('resize', setAppHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', setAppHeight);
+  window.visualViewport.addEventListener('scroll', setAppHeight);
+}
+// Re-apply after any navigation (address bar show/hide)
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') {
+    setTimeout(setAppHeight, 100);
+    setTimeout(setAppHeight, 500);
+  }
+});
+
+window.addEventListener("load", () => {
+  // Clean nocache param from URL
+  if(window.location.search) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+  setAppHeight();
+  setTimeout(setAppHeight, 300);
+  init();
+});
 </script>
 <script>
 if ('serviceWorker' in navigator) {
@@ -2748,9 +2497,9 @@ function checkForUpdate() {
         return navigator.serviceWorker.getRegistrations().then(regs=>Promise.all(regs.map(r=>r.unregister())));
     })
     .then(()=>{
-      window.location.href = window.location.pathname + '?nocache=' + Date.now();
+      window.location.replace(window.location.pathname);
     })
-    .catch(()=>window.location.reload(true));
+    .catch(()=>window.location.replace(window.location.pathname));
 }
 </script>
 
@@ -2883,12 +2632,9 @@ function checkForUpdate() {
     });
   }
 
-  let boardRotation = 0;
-
   function frame() {
     ctx.clearRect(0,0,W,H);
     pulse += 0.008;
-    boardRotation += 0.0008; // very slow rotation ~2min per full turn
     // Subtle pulsing glow behind board
     const bx=BX(),by=BY(),br=BR();
     const grd = ctx.createRadialGradient(bx,by,br*0.3,bx,by,br*1.1);
@@ -2896,13 +2642,7 @@ function checkForUpdate() {
     grd.addColorStop(0,`rgba(0,232,122,${gAlpha})`);
     grd.addColorStop(1,'rgba(0,232,122,0)');
     ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-    // Draw board with rotation
-    ctx.save();
-    ctx.translate(bx, by);
-    ctx.rotate(boardRotation);
-    ctx.translate(-bx, -by);
     drawBoard();
-    ctx.restore();
     drawParticles();
     requestAnimationFrame(frame);
   }
