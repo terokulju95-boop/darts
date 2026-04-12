@@ -1988,6 +1988,7 @@ async function goStats() {
   if(S.statsLoaded && S.statsCachedAt && (now-S.statsCachedAt)<300000) {
     render(); return;
   }
+  try {
   initFirebase();
   const h=await fbLoadHistory();
   const st={};
@@ -2024,6 +2025,11 @@ async function goStats() {
   // Reverse last10 so newest is last (for chart left-to-right)
   Object.values(st).forEach(s=>s.last10.reverse());
   S.stats=st; S.statsLoaded=true; S.statsCachedAt=Date.now();
+  } catch(e) {
+    console.error('goStats error:', e);
+    showToast('Tilastojen lataus epäonnistui: ' + e.message, 'error');
+    S.statsLoaded=true; S.stats={};
+  }
   render();
 }
 
