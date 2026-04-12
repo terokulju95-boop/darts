@@ -1,4 +1,4 @@
-const CACHE = 'darts-v3';
+const CACHE = 'darts-v4';
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -16,7 +16,6 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Allow app to trigger update
 self.addEventListener('message', e => {
   if(e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
@@ -25,6 +24,18 @@ self.addEventListener('fetch', e => {
   const url = e.request.url;
   if(url.includes('firebase')||url.includes('firestore')||url.includes('googleapis')) {
     e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+    return;
+  }
+  // Network first for HTML to always get latest
+  if(url.endsWith('.html') || url.endsWith('/')) {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if(res && res.status===200) {
+          caches.open(CACHE).then(c=>c.put(e.request,res.clone()));
+        }
+        return res;
+      }).catch(()=>caches.match(e.request))
+    );
     return;
   }
   e.respondWith(
