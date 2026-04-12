@@ -2682,7 +2682,7 @@ function renderRecords() {
       content = '<div class="empty-state"><span class="ei">👤</span><p>Valitse pelaaja ylhäältä</p></div>';
     } else {
       const col = playerColor(S.players.findIndex(x=>x.id===curP.id));
-      const winPct = curP.games>0?Math.round((curP.wins||0)/curP.games*100):0;
+      const winPct = (curP.multiGames||0)>0?Math.round((curP.wins||0)/curP.multiGames*100):0;
       const bustPct = curP.totalTurns>0?Math.round((curP.totalBusts||0)/curP.totalTurns*100):0;
       const statRows = [
         ['⚡','Korkein checkout', (curP.bestCheckout||0)+' pts'],
@@ -2701,7 +2701,7 @@ function renderRecords() {
       content = `
         <div style="background:${col.bg}18;border:1px solid ${col.bg}44;border-radius:12px;padding:14px 16px;margin-bottom:10px;">
           <div style="font-family:var(--fd);font-size:24px;color:${col.bg};">${esc(curP.name||'').toUpperCase()}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${curP.games||0} peliä · ${curP.wins||0} voittoa</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${curP.multiGames||0} moninpeliä · ${curP.wins||0} voittoa${curP.soloGames?' · '+(curP.soloGames)+' solo':''}</div>
         </div>
         ${statRows.map(([icon,label,val])=>`
           <div style="background:rgba(22,22,34,0.75);border:1px solid var(--border);border-radius:12px;padding:13px 16px;margin-bottom:7px;display:flex;align-items:center;gap:12px;">
