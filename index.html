@@ -2119,12 +2119,19 @@ function testFb() {
 }
 
 // ==================== TOURNAMENT ====================
+// ==================== TOURNAMENT SYSTEM ====================
+
+// ---- SETUP ----
 function renderTournamentSetup() {
-  const div=el('div','screen');
-  const sel=S.tournament?.players||[];
-  const cards=S.players.map((p,idx)=>{
-    const on=sel.includes(p.id);
-    const col=playerColor(idx);
+  const div = el('div','screen');
+  if(!S.tournament) S.tournament = {players:[], format:'quick', gameType:'501', checkoutMode:'double', legsGroup:1, legsKnockout:2, legsSpecial:1};
+  const t = S.tournament;
+  const sel = t.players||[];
+  const format = t.format||'quick';
+
+  const cards = S.players.map((p,idx)=>{
+    const on = sel.includes(p.id);
+    const col = playerColor(idx);
     return `<div class="player-select-card ${on?'selected':''}" onclick="toggleTournamentPlayer('${p.id}')"
       style="border-color:${on?col.bg:'var(--border)'};${on?'background:'+col.bg+'18;':''}">
       <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
@@ -2132,106 +2139,479 @@ function renderTournamentSetup() {
       <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
     </div>`;
   }).join('');
-  const ok=sel.length>=2;
-  div.innerHTML=`
+
+  const optBtn = (val, label, key='format') =>
+    `<button class="option-btn ${t[key]===val?'selected':''}" onclick="setTConfig('${key}','${val}');render()">${label}</button>`;
+
+  const legsRow = (key, label) => `
+    <div style="margin-bottom:10px;">
+      <div class="config-label">${label}</div>
+      <div class="option-row">
+        ${[1,2,3,4,5].map(n=>`<button class="option-btn ${t[key]===n?'selected':''}" onclick="setTConfig('${key}',${n});render()">${n}</button>`).join('')}
+      </div>
+    </div>`;
+
+  const ok = sel.length >= 2 && sel.length <= 10;
+
+  div.innerHTML = `
     <div class="header">
       <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
       <div class="header-title">Turnaus</div>
     </div>
-    <div class="order-hint">Valitse vähintään 2 pelaajaa. Turnaus arvotaan automaattisesti.</div>
-    <div class="player-select-list">${cards}</div>
-    <div style="padding:10px 14px;">
-      <div class="config-label">Pelityyppi</div>
-      <div class="option-row" style="margin-top:6px;">
-        <button class="option-btn ${(S.tournament?.gameType||'501')==='501'?'selected':''}" onclick="setTConfig('gameType','501');render()">501</button>
-        <button class="option-btn ${(S.tournament?.gameType||'501')==='301'?'selected':''}" onclick="setTConfig('gameType','301');render()">301</button>
-        <button class="option-btn ${(S.tournament?.gameType||'501')==='701'?'selected':''}" onclick="setTConfig('gameType','701');render()">701</button>
+    <div style="overflow-y:auto;flex:1;padding-bottom:20px;">
+      <div class="config-section">
+        <div class="config-label">Turnausmuoto</div>
+        <div class="option-row">
+          ${optBtn('quick','⚡ Nopea')}
+          ${optBtn('long','🏆 Pitkä (alkusarja + pudotuspelit)')}
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--muted);">
+          ${format==='quick'?'Suorat pudotuspelit, arvotut parit. Nopea.':'Kaikki pelaa kaikkia, sitten pudotuspelit seedauksen mukaan. Max 10 pelaajaa.'}
+        </div>
       </div>
-    </div>
-    <div style="padding:6px 14px 14px;">
-      <button class="btn large ${ok?'':'disabled'}" onclick="${ok?'startTournament()':'void(0)'}">Aloita turnaus &#127942;</button>
+
+      <div class="config-section">
+        <div class="config-label">Pelaajat (${sel.length}${format==='long'?' / max 10':''})</div>
+        <div class="player-select-list" style="padding:0;">${cards||'<div class="empty-state"><span class="ei">👤</span><p>Lisää pelaajia ensin</p></div>'}</div>
+      </div>
+
+      <div class="config-section">
+        <div class="config-label">Pelityyppi</div>
+        <div class="option-row">
+          ${['501','301','701','cricket','atc','custom_x01'].map(g=>`<button class="option-btn ${t.gameType===g?'selected':''}" onclick="setTConfig('gameType','${g}');render()">${g==='cricket'?'Cricket':g==='atc'?'ATC':g==='custom_x01'?'Oma X01':g}</button>`).join('')}
+        </div>
+      </div>
+
+      <div class="config-section">
+        <div class="config-label">Lopetustapa (X01-peleissä)</div>
+        <div class="option-row">
+          ${[['double','Double Out'],['single','Single Out'],['master','Master Out'],['any','Vapaa']].map(([v,l])=>`<button class="option-btn ${t.checkoutMode===v?'selected':''}" onclick="setTConfig('checkoutMode','${v}');render()">${l}</button>`).join('')}
+        </div>
+      </div>
+
+      ${format==='long'?`
+      <div class="config-section">
+        ${legsRow('legsGroup','Legit alkusarjassa')}
+        ${legsRow('legsKnockout','Legit pudotuspeleissä')}
+        ${legsRow('legsSpecial','Legit erikoisottelussa (1v1v1)')}
+      </div>`:`
+      <div class="config-section">
+        ${legsRow('legsKnockout','Legit per ottelu')}
+      </div>`}
+
+      <div style="padding:14px;">
+        <button class="btn large ${ok?'':'disabled'}" onclick="${ok?'startTournament()':'void(0)'}">
+          Aloita turnaus 🎯
+        </button>
+        ${!ok&&sel.length>10?'<div style="color:var(--red);font-size:13px;text-align:center;margin-top:8px;">Max 10 pelaajaa pitkässä turnauksessa</div>':''}
+      </div>
     </div>
   `;
   return div;
 }
 
 function setTConfig(k,v) {
-  if(!S.tournament) S.tournament={players:[],gameType:'501'};
+  if(!S.tournament) S.tournament={players:[],format:'quick',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
   S.tournament[k]=v;
 }
 
 function toggleTournamentPlayer(id) {
-  if(!S.tournament) S.tournament={players:[],gameType:'501'};
+  if(!S.tournament) S.tournament={players:[],format:'quick',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
   const arr=S.tournament.players;
   const i=arr.indexOf(id);
   if(i===-1) arr.push(id); else arr.splice(i,1);
   nav('tournament-setup');
 }
 
+// ---- START ----
 function startTournament() {
-  const t=S.tournament;
-  const players=[...t.players].sort(()=>Math.random()-0.5);
-  // Build bracket - pad to power of 2
-  const n=players.length;
-  const size=Math.pow(2,Math.ceil(Math.log2(Math.max(n,2))));
-  const padded=[...players,...Array(size-n).fill('bye')];
-  const matches=[];
+  const t = S.tournament;
+  if(t.format==='long') startLongTournament();
+  else startQuickTournament();
+}
+
+function startQuickTournament() {
+  const t = S.tournament;
+  const players = [...t.players].sort(()=>Math.random()-0.5);
+  const n = players.length;
+  const size = Math.pow(2,Math.ceil(Math.log2(Math.max(n,2))));
+  const padded = [...players,...Array(size-n).fill('bye')];
+  const matches = [];
   for(let i=0;i<size;i+=2){
     matches.push({p1:padded[i],p2:padded[i+1],winner:padded[i+1]==='bye'?padded[i]:null,round:0,idx:matches.length});
   }
-  S.tournament={...t, bracket:[matches], currentMatch:null, round:0, size, done:false};
-  // Auto-advance byes
+  S.tournament = {...t, format:'quick', bracket:[matches], currentMatch:null, round:0, size, done:false};
   advanceByes();
   nav('tournament-bracket');
 }
 
-function advanceByes() {
-  const t=S.tournament;
-  const roundMatches=t.bracket[t.round];
-  roundMatches.forEach(m=>{ if(m.p2==='bye'&&!m.winner) m.winner=m.p1; });
-  // Check if round done
-  if(roundMatches.every(m=>m.winner)){
-    const winners=roundMatches.map(m=>m.winner);
-    if(winners.length===1){ t.done=true; t.champion=winners[0]; return; }
-    const nextRound=[];
-    for(let i=0;i<winners.length;i+=2){
-      nextRound.push({p1:winners[i],p2:winners[i+1]||'bye',winner:winners[i+1]?null:winners[i],round:t.round+1,idx:nextRound.length});
+function startLongTournament() {
+  const t = S.tournament;
+  const players = [...t.players];
+  // Build all round-robin matches
+  const groupMatches = [];
+  for(let i=0;i<players.length;i++){
+    for(let j=i+1;j<players.length;j++){
+      groupMatches.push({p1:players[i],p2:players[j],winner:null,p1Legs:0,p2Legs:0,played:false});
     }
-    t.bracket.push(nextRound); t.round++;
-    advanceByes();
   }
+  S.tournament = {
+    ...t, format:'long',
+    phase:'group', done:false, champion:null,
+    groupPlayers: players,
+    groupMatches,
+    groupStandings: players.map(id=>({id,points:0,legWins:0,legLosses:0,played:0})),
+    knockoutPlayers: [], // set after group stage
+    knockoutRound: 0,
+    knockoutMatches: [], // array of rounds, each round is array of matches
+    losersMatch: null,
+    currentMatch: null,
+    tiebreakNeeded: null, // {players:[], reason:''}
+  };
+  nav('tournament-bracket');
 }
 
-function startTournamentMatch(matchIdx) {
-  const t=S.tournament;
-  const m=t.bracket[t.round][matchIdx];
-  if(!m||m.winner) return;
-  t.currentMatch={round:t.round,idx:matchIdx};
-  // Setup game
-  const p1=S.players.find(x=>x.id===m.p1);
-  const p2=S.players.find(x=>x.id===m.p2);
+// ---- HELPERS ----
+function tGetGameConfig(legsToWin) {
+  const t = S.tournament;
+  const gt = t.gameType||'501';
+  const isX01 = ['501','301','701','custom_x01'].includes(gt);
+  const start = gt==='301'?301:gt==='701'?701:gt==='custom_x01'?(t.customScore||501):501;
+  return {
+    type: gt, checkoutMode: t.checkoutMode||'double',
+    startScore: isX01?start:0,
+    legs: legsToWin, legsToWin,
+  };
+}
+
+function tPName(id) { return S.players.find(p=>p.id===id)?.name||'?'; }
+function tPCol(id) {
+  const t = S.tournament;
+  const players = t.groupPlayers||t.players||[];
+  const idx = players.indexOf(id);
+  return playerColor(idx>=0?idx:0);
+}
+
+// ---- GROUP STAGE ----
+function tGroupNextMatch() {
+  const t = S.tournament;
+  if(t.phase!=='group') return null;
+  return t.groupMatches.find(m=>!m.played)||null;
+}
+
+function tGroupAllDone() {
+  return S.tournament.groupMatches.every(m=>m.played);
+}
+
+function tUpdateStandings(match) {
+  const t = S.tournament;
+  const w = match.winner;
+  const l = w===match.p1?match.p2:match.p1;
+  const wSt = t.groupStandings.find(s=>s.id===w);
+  const lSt = t.groupStandings.find(s=>s.id===l);
+  if(wSt){ wSt.points+=2; wSt.legWins+=match.winner===match.p1?match.p1Legs:match.p2Legs; wSt.legLosses+=match.winner===match.p1?match.p2Legs:match.p1Legs; wSt.played++; }
+  if(lSt){ lSt.legWins+=match.winner===match.p1?match.p2Legs:match.p1Legs; lSt.legLosses+=match.winner===match.p1?match.p1Legs:match.p2Legs; lSt.played++; }
+}
+
+function tSortStandings(players) {
+  const t = S.tournament;
+  const standings = players.map(id=>t.groupStandings.find(s=>s.id===id)||{id,points:0,legWins:0,legLosses:0});
+
+  standings.sort((a,b)=>{
+    // 1. Points
+    if(b.points!==a.points) return b.points-a.points;
+    // 2. Leg wins
+    if(b.legWins!==a.legWins) return b.legWins-a.legWins;
+    // 3. Head-to-head (only between tied players)
+    const h2h = tHeadToHead(a.id, b.id);
+    if(h2h) return h2h;
+    // 4. Draw (caller handles 3+ way tie)
+    return 0;
+  });
+  return standings;
+}
+
+function tHeadToHead(id1, id2) {
+  const t = S.tournament;
+  const m = t.groupMatches.find(m=>(m.p1===id1&&m.p2===id2)||(m.p1===id2&&m.p2===id1));
+  if(!m||!m.winner) return 0;
+  if(m.winner===id1) return -1; // id1 wins = comes first
+  return 1;
+}
+
+function tBuildKnockout() {
+  const t = S.tournament;
+  const sorted = tSortStandings(t.groupPlayers);
+  let advancing = sorted.map(s=>s.id);
+
+  // 10 players: drop 2 worst
+  if(t.groupPlayers.length===10) {
+    // Check if 3+ tied for spots 8-10 → need tiebreak match
+    const bottom3 = advancing.slice(7);
+    const s8=t.groupStandings.find(s=>s.id===bottom3[0]);
+    const s9=t.groupStandings.find(s=>s.id===bottom3[1]);
+    const s10=t.groupStandings.find(s=>s.id===bottom3[2]);
+    const allTied = s8&&s9&&s10&&s8.points===s9.points&&s9.points===s10.points&&s8.legWins===s9.legWins&&s9.legWins===s10.legWins;
+    if(allTied) {
+      // Need 3-player tiebreak - only 1 can advance
+      t.tiebreakNeeded = {players:bottom3, reason:'Kolmen pelaajan tasatilanne - pelataan 1v1v1', advanceCount:1};
+      nav('tournament-bracket');
+      return;
+    }
+    // Check if spots 9-10 tied
+    const s9b=t.groupStandings.find(s=>s.id===advancing[8]);
+    const s10b=t.groupStandings.find(s=>s.id===advancing[9]);
+    if(s9b&&s10b&&s9b.points===s10b.points&&s9b.legWins===s10b.legWins&&tHeadToHead(advancing[8],advancing[9])===0) {
+      t.tiebreakNeeded = {players:[advancing[8],advancing[9]], reason:'Tasatilanne - ratkaistaan darts-pelillä', advanceCount:0};
+      nav('tournament-bracket');
+      return;
+    }
+    advancing = advancing.slice(0,8);
+  }
+
+  t.knockoutPlayers = advancing;
+  t.knockoutMatches = [tBuildKnockoutRound(advancing)];
+  t.knockoutRound = 0;
+  t.phase = 'knockout';
+  t.losersMatch = null;
+  nav('tournament-bracket');
+}
+
+function tBuildKnockoutRound(players) {
+  // Best vs worst seeding
+  const matches = [];
+  const n = players.length;
+  for(let i=0;i<Math.floor(n/2);i++){
+    matches.push({p1:players[i],p2:players[n-1-i],winner:null,p1Legs:0,p2Legs:0});
+  }
+  // Odd player left
+  if(n%2===1) {
+    const byePlayer = players[Math.floor(n/2)];
+    matches.push({p1:byePlayer,p2:'bye',winner:byePlayer,p1Legs:0,p2Legs:0});
+  }
+  return matches;
+}
+
+function tKnockoutRoundDone() {
+  const t = S.tournament;
+  const round = t.knockoutMatches[t.knockoutRound];
+  return round && round.every(m=>m.winner);
+}
+
+function tAdvanceKnockout() {
+  const t = S.tournament;
+  const round = t.knockoutMatches[t.knockoutRound];
+  const winners = round.filter(m=>m.p2!=='bye'||m.winner).map(m=>m.winner);
+  const losers = round.filter(m=>m.p2!=='bye'&&m.winner).map(m=>m.winner===m.p1?m.p2:m.p1);
+
+  // Check for loser's match (odd winners)
+  if(winners.length%2===1 && losers.length>0 && !t.losersMatch) {
+    // Need loser's match
+    t.losersMatch = {players:losers, winner:null, roundIdx:t.knockoutRound};
+    nav('tournament-bracket');
+    return;
+  }
+
+  let allAdvancing = [...winners];
+  if(t.losersMatch?.winner && !allAdvancing.includes(t.losersMatch.winner)) {
+    allAdvancing.push(t.losersMatch.winner);
+    t.losersMatch = null;
+  }
+
+  // Sort by original group stage ranking
+  allAdvancing.sort((a,b)=>{
+    const ai = t.knockoutPlayers.indexOf(a);
+    const bi = t.knockoutPlayers.indexOf(b);
+    return ai-bi;
+  });
+
+  if(allAdvancing.length===1) {
+    t.done=true; t.champion=allAdvancing[0];
+    saveTournamentToFirebase(t);
+    nav('tournament-bracket');
+    return;
+  }
+
+  t.knockoutMatches.push(tBuildKnockoutRound(allAdvancing));
+  t.knockoutRound++;
+  t.losersMatch=null;
+  nav('tournament-bracket');
+}
+
+// ---- START MATCH ----
+function startGroupMatch(matchIdx) {
+  const t = S.tournament;
+  const m = t.groupMatches[matchIdx];
+  if(!m||m.played) return;
+  const p1 = S.players.find(x=>x.id===m.p1);
+  const p2 = S.players.find(x=>x.id===m.p2);
   if(!p1||!p2) return;
-  const start=t.gameType==='301'?301:t.gameType==='701'?701:501;
-  S.game={type:t.gameType,gameOver:false,winner:null,startTime:Date.now(),currentPlayerIndex:0,currentDarts:[],modifier:null,
-    startScore:start,checkoutMode:'double',legs:1,legsToWin:1,
-    players:[{id:p1.id,name:p1.name,score:start,history:[],legsWon:0},{id:p2.id,name:p2.name,score:start,history:[],legsWon:0}],
-    turnStartScore:start, isTournamentMatch:true};
+  t.currentMatch = {type:'group', idx:matchIdx};
+  const cfg = tGetGameConfig(t.legsGroup||1);
+  const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
+  S.game = {
+    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    currentPlayerIndex:0, currentDarts:[], modifier:null,
+    startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
+    legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
+    players:[
+      {id:p1.id,name:p1.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+      {id:p2.id,name:p2.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+    ],
+    turnStartScore:isX01?cfg.startScore:0, isTournamentMatch:true,
+  };
   nav('game');
 }
 
+function startKnockoutMatch(roundIdx, matchIdx) {
+  const t = S.tournament;
+  const m = t.knockoutMatches[roundIdx][matchIdx];
+  if(!m||m.winner||m.p2==='bye') return;
+  const p1 = S.players.find(x=>x.id===m.p1);
+  const p2 = S.players.find(x=>x.id===m.p2);
+  if(!p1||!p2) return;
+  t.currentMatch = {type:'knockout', roundIdx, matchIdx};
+  const cfg = tGetGameConfig(t.legsKnockout||2);
+  const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
+  S.game = {
+    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    currentPlayerIndex:0, currentDarts:[], modifier:null,
+    startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
+    legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
+    players:[
+      {id:p1.id,name:p1.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+      {id:p2.id,name:p2.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+    ],
+    turnStartScore:isX01?cfg.startScore:0, isTournamentMatch:true,
+  };
+  nav('game');
+}
+
+function startLosersMatch() {
+  const t = S.tournament;
+  const lm = t.losersMatch;
+  if(!lm||lm.winner) return;
+  const players = lm.players.map(id=>S.players.find(x=>x.id===id)).filter(Boolean);
+  if(players.length<2) return;
+  t.currentMatch = {type:'losers'};
+  const cfg = tGetGameConfig(t.legsSpecial||1);
+  const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
+  S.game = {
+    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    currentPlayerIndex:0, currentDarts:[], modifier:null,
+    startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
+    legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
+    players: players.map(p=>({
+      id:p.id,name:p.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,
+      heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}
+    })),
+    turnStartScore:isX01?cfg.startScore:0, isTournamentMatch:true,
+  };
+  nav('game');
+}
+
+function startTiebreakMatch() {
+  const t = S.tournament;
+  const tb = t.tiebreakNeeded;
+  if(!tb) return;
+  const players = tb.players.map(id=>S.players.find(x=>x.id===id)).filter(Boolean);
+  t.currentMatch = {type:'tiebreak'};
+  const cfg = tGetGameConfig(1);
+  const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
+  S.game = {
+    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    currentPlayerIndex:0, currentDarts:[], modifier:null,
+    startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
+    legs:1, legsToWin:1,
+    players: players.map(p=>({
+      id:p.id,name:p.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,
+      heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}
+    })),
+    turnStartScore:isX01?cfg.startScore:0, isTournamentMatch:true,
+  };
+  nav('game');
+}
+
+// ---- MATCH DONE ----
 function tournamentMatchDone(winnerId) {
-  const t=S.tournament;
+  const t = S.tournament;
   if(!t||!t.currentMatch) return;
-  const m=t.bracket[t.currentMatch.round][t.currentMatch.idx];
-  m.winner=winnerId;
-  t.currentMatch=null;
-  // Check round done
-  const roundMatches=t.bracket[t.round];
+  const cm = t.currentMatch;
+  t.currentMatch = null;
+
+  // Quick tournament (old bracket system)
+  if(t.format==='quick') {
+    quickTournamentMatchDone(winnerId, cm);
+    return;
+  }
+
+  // Group stage
+  if(cm.type==='group') {
+    const m = t.groupMatches[cm.idx];
+    const g = S.game;
+    m.winner = winnerId;
+    m.played = true;
+    m.p1Legs = g.players.find(p=>p.id===m.p1)?.legsWon||0;
+    m.p2Legs = g.players.find(p=>p.id===m.p2)?.legsWon||0;
+    tUpdateStandings(m);
+    if(tGroupAllDone()) {
+      showToast('Alkusarja valmis! Rakennetaan pudotuspelit...','success');
+      setTimeout(tBuildKnockout, 800);
+    } else {
+      nav('tournament-bracket');
+    }
+    return;
+  }
+
+  // Tiebreak
+  if(cm.type==='tiebreak') {
+    const tb = t.tiebreakNeeded;
+    const losers = tb.players.filter(id=>id!==winnerId);
+    // Remove losers from standings order
+    const sorted = tSortStandings(t.groupPlayers);
+    let advancing = sorted.map(s=>s.id).filter(id=>!losers.includes(id));
+    if(t.groupPlayers.length===10) advancing=advancing.slice(0,8);
+    t.tiebreakNeeded = null;
+    t.knockoutPlayers = advancing;
+    t.knockoutMatches = [tBuildKnockoutRound(advancing)];
+    t.knockoutRound = 0;
+    t.phase = 'knockout';
+    nav('tournament-bracket');
+    return;
+  }
+
+  // Knockout
+  if(cm.type==='knockout') {
+    const m = t.knockoutMatches[cm.roundIdx][cm.matchIdx];
+    const g = S.game;
+    m.winner = winnerId;
+    m.p1Legs = g.players.find(p=>p.id===m.p1)?.legsWon||0;
+    m.p2Legs = g.players.find(p=>p.id===m.p2)?.legsWon||0;
+    if(tKnockoutRoundDone()) tAdvanceKnockout();
+    else nav('tournament-bracket');
+    return;
+  }
+
+  // Losers match
+  if(cm.type==='losers') {
+    t.losersMatch.winner = winnerId;
+    if(tKnockoutRoundDone()) tAdvanceKnockout();
+    else nav('tournament-bracket');
+    return;
+  }
+}
+
+// Quick tournament old logic
+function quickTournamentMatchDone(winnerId, cm) {
+  const t = S.tournament;
+  const m = t.bracket[cm.round||t.round][cm.idx];
+  if(m) m.winner = winnerId;
+  t.currentMatch = null;
+  const roundMatches = t.bracket[t.round];
   if(roundMatches.every(m=>m.winner)){
-    const winners=roundMatches.map(m=>m.winner);
+    const winners = roundMatches.map(m=>m.winner);
     if(winners.length===1){
       t.done=true; t.champion=winners[0];
-      // Save tournament to Firebase + update winner stats
       saveTournamentToFirebase(t);
       nav('tournament-bracket'); return;
     }
@@ -2245,96 +2625,227 @@ function tournamentMatchDone(winnerId) {
   nav('tournament-bracket');
 }
 
-async function saveTournamentToFirebase(t) {
-  if(!db) return;
-  try {
-    const pName = id => S.players.find(p=>p.id===id)?.name||'?';
-    await db.collection('darts_tournaments').add({
-      champion: t.champion ? {id:t.champion, name:pName(t.champion)} : null,
-      players: (t.players||[]).map(id=>({id,name:pName(id)})),
-      gameType: t.gameType||'501',
-      rounds: t.bracket?.length||0,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    // Update winner's tournament wins
-    if(t.champion && db) {
-      const doc = await db.collection('darts_players').doc(t.champion).get();
-      const cur = doc.exists?doc.data():{};
-      const tWins = (cur.tournamentWins||0)+1;
-      await db.collection('darts_players').doc(t.champion).update({tournamentWins: tWins});
-      // Check tournament achievement
-      const p2 = S.players.find(x=>x.id===t.champion);
-      if(p2) {
-        p2.tournamentWins = tWins;
-        const newA = checkAchievements({...cur,tournamentWins:tWins}, cur);
-        if(newA.length) {
-          await db.collection('darts_players').doc(t.champion).update({
-            achievements:[...(cur.achievements||[]),...newA]
-          });
-          newA.forEach(aid=>{const a=ACHIEVEMENTS.find(x=>x.id===aid);if(a)setTimeout(()=>showToast('🎖️ '+a.name,'success'),2000);});
-        }
-      }
+function advanceByes() {
+  const t = S.tournament;
+  if(!t.bracket) return;
+  const roundMatches = t.bracket[t.round];
+  roundMatches.forEach(m=>{ if(m.p2==='bye'&&!m.winner) m.winner=m.p1; });
+  if(roundMatches.every(m=>m.winner)){
+    const winners=roundMatches.map(m=>m.winner);
+    if(winners.length===1){ t.done=true; t.champion=winners[0]; return; }
+    const nextRound=[];
+    for(let i=0;i<winners.length;i+=2){
+      nextRound.push({p1:winners[i],p2:winners[i+1]||'bye',winner:winners[i+1]?null:winners[i],round:t.round+1,idx:nextRound.length});
     }
-    showToast('Turnaus tallennettu ✓','success');
-  } catch(e) { console.error('saveTournament:',e); }
+    t.bracket.push(nextRound); t.round++;
+    advanceByes();
+  }
 }
 
+// ---- RENDER BRACKET ----
 function renderTournamentBracket() {
-  const t=S.tournament;
-  if(!t){return renderHome();}
-  const div=el('div','screen');
-  const pName=id=>S.players.find(p=>p.id===id)?.name||'?';
-  const pCol=id=>{const idx=t.bracket[0].findIndex(m=>m.p1===id||m.p2===id);return playerColor(idx>=0?idx:0);};
+  const t = S.tournament;
+  if(!t){ return renderHome(); }
+  const div = el('div','screen');
 
-  let bracketHtml='';
-  t.bracket.forEach((round,ri)=>{
-    const rNames=['1. kierros','Puoliväli','Välierä','Finaali'];
-    const rName=rNames[ri]||`Kierros ${ri+1}`;
-    bracketHtml+=`<div style="margin-bottom:16px;"><div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:0 14px 6px;">${rName.toUpperCase()}</div>`;
-    round.forEach((m,mi)=>{
-      const p1n=m.p1==='bye'?'—':pName(m.p1);
-      const p2n=m.p2==='bye'?'—':pName(m.p2);
-      const done=!!m.winner;
-      const current=t.currentMatch?.round===ri&&t.currentMatch?.idx===mi;
-      const playable=ri===t.round&&!done&&m.p2!=='bye';
-      const col1=m.p1!=='bye'?pCol(m.p1).bg:'var(--muted)';
-      const col2=m.p2!=='bye'?pCol(m.p2).bg:'var(--muted)';
-      bracketHtml+=`<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid ${done?'rgba(0,232,122,0.3)':'var(--border)'};border-radius:12px;overflow:hidden;${playable?'cursor:pointer;':''}" ${playable?'onclick="startTournamentMatch('+mi+')"':''}>
-        <div style="display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border);${m.winner===m.p1?'background:rgba(0,232,122,0.08);':''}">
-          <div style="width:10px;height:10px;border-radius:50%;background:${col1};margin-right:10px;"></div>
-          <div style="flex:1;font-size:16px;font-weight:600;color:${m.winner===m.p1?'var(--accent)':'var(--text)'};">${esc(p1n)}</div>
-          ${m.winner===m.p1?'<div style="color:var(--accent);font-size:18px;">✓</div>':''}
-        </div>
-        <div style="display:flex;align-items:center;padding:12px 14px;${m.winner===m.p2?'background:rgba(0,232,122,0.08);':''}">
-          <div style="width:10px;height:10px;border-radius:50%;background:${col2};margin-right:10px;"></div>
-          <div style="flex:1;font-size:16px;font-weight:600;color:${m.winner===m.p2?'var(--accent)':'var(--text)'};">${esc(p2n)}</div>
-          ${m.winner===m.p2?'<div style="color:var(--accent);font-size:18px;">✓</div>':''}
-        </div>
-        ${playable?'<div style="text-align:center;padding:8px;font-size:13px;color:var(--accent);border-top:1px solid var(--border);">▶ Pelaa ottelu</div>':''}
-      </div>`;
-    });
-    bracketHtml+='</div>';
-  });
-
-  if(t.done&&t.champion) {
-    const champ=pName(t.champion);
-    bracketHtml=`<div style="text-align:center;padding:24px;"><div style="font-size:64px;margin-bottom:8px;">🏆</div>
-      <div style="font-family:var(--fd);font-size:42px;color:var(--gold);">${esc(champ)}</div>
-      <div style="color:var(--muted);margin-top:6px;">TURNAUKSEN VOITTAJA</div></div>`+bracketHtml;
+  if(t.format==='long') {
+    renderLongTournamentBracket(div);
+  } else {
+    renderQuickTournamentBracket(div);
   }
-
-  div.innerHTML=`
-    <div class="header">
-      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Turnaus ${t.done?'✓':''}</div>
-    </div>
-    <div style="overflow-y:auto;flex:1;">${bracketHtml}</div>
-    ${!t.done?`<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`:`<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`}
-  `;
   return div;
 }
 
+function renderQuickTournamentBracket(div) {
+  const t = S.tournament;
+  const pName = id=>tPName(id);
+  const pCol = id=>tPCol(id);
+
+  let html = '';
+  if(t.done&&t.champion){
+    html += `<div style="text-align:center;padding:24px;">
+      <div style="font-size:64px;margin-bottom:8px;">🏆</div>
+      <div style="font-family:var(--fd);font-size:42px;color:var(--gold);">${esc(pName(t.champion))}</div>
+      <div style="color:var(--muted);margin-top:6px;">TURNAUKSEN VOITTAJA</div>
+    </div>`;
+  }
+
+  (t.bracket||[]).forEach((round,ri)=>{
+    const rNames=['1. kierros','Puolivälierä','Välierä','Finaali'];
+    const rName = rNames[ri]||`Kierros ${ri+1}`;
+    html += `<div style="margin-bottom:16px;"><div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:0 14px 6px;">${rName.toUpperCase()}</div>`;
+    round.forEach((m,mi)=>{
+      const done=!!m.winner; const playable=ri===t.round&&!done&&m.p2!=='bye';
+      html += tMatchCard(m.p1,m.p2,m.winner,playable,`startTournamentMatch(${mi})`);
+    });
+    html += '</div>';
+  });
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Turnaus ⚡ ${t.done?'✓':''}</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;">${html}</div>
+    ${t.done?
+      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`:
+      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`
+    }`;
+}
+
+function renderLongTournamentBracket(div) {
+  const t = S.tournament;
+  let html = '';
+
+  if(t.done&&t.champion){
+    html += `<div style="text-align:center;padding:20px;">
+      <div style="font-size:56px;">🏆</div>
+      <div style="font-family:var(--fd);font-size:38px;color:var(--gold);">${esc(tPName(t.champion))}</div>
+      <div style="color:var(--muted);font-size:13px;margin-top:4px;">TURNAUKSEN VOITTAJA</div>
+    </div>`;
+  }
+
+  // GROUP STAGE
+  html += `<div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:10px 14px 6px;">ALKUSARJA</div>`;
+
+  // Standings table
+  const standings = tSortStandings(t.groupPlayers);
+  html += `<div style="margin:0 14px 12px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+    <div style="display:grid;grid-template-columns:24px 1fr 40px 40px 40px;gap:0;padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);letter-spacing:1px;">
+      <div>#</div><div>PELAAJA</div><div style="text-align:center;">P</div><div style="text-align:center;">EV</div><div style="text-align:center;">PTS</div>
+    </div>
+    ${standings.map((s,i)=>{
+      const col = tPCol(s.id);
+      const eliminated = t.groupPlayers.length===10 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
+      return `<div style="display:grid;grid-template-columns:24px 1fr 40px 40px 40px;gap:0;padding:9px 12px;border-bottom:1px solid var(--border);opacity:${eliminated?0.35:1};background:${i===0?col.bg+'18':'transparent'};">
+        <div style="font-family:var(--fd);font-size:16px;color:var(--muted);">${i+1}</div>
+        <div style="font-size:14px;font-weight:700;color:${col.bg};">${esc(tPName(s.id))}</div>
+        <div style="text-align:center;font-size:13px;">${s.played||0}</div>
+        <div style="text-align:center;font-size:13px;">${s.legWins||0}</div>
+        <div style="text-align:center;font-family:var(--fd);font-size:16px;color:var(--accent);">${s.points||0}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  // Group matches
+  const pending = t.groupMatches.filter(m=>!m.played);
+  const done = t.groupMatches.filter(m=>m.played);
+  if(pending.length>0 && t.phase==='group'){
+    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">SEURAAVA OTTELU</div>`;
+    const next = pending[0];
+    const mi = t.groupMatches.indexOf(next);
+    html += tMatchCard(next.p1, next.p2, null, true, `startGroupMatch(${mi})`, `${pending.length} ottelua jäljellä`);
+  }
+  if(done.length>0){
+    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">PELATUT OTTELUT</div>`;
+    done.slice().reverse().forEach(m=>{
+      html += tMatchCard(m.p1, m.p2, m.winner, false, '', `${m.p1Legs||0}-${m.p2Legs||0}`);
+    });
+  }
+
+  // Tiebreak needed
+  if(t.tiebreakNeeded){
+    const tb = t.tiebreakNeeded;
+    html += `<div style="font-family:var(--fd);font-size:18px;color:var(--red);letter-spacing:2px;padding:10px 14px 6px;">TASATILANNE!</div>`;
+    html += `<div style="margin:0 14px 8px;background:rgba(255,51,85,0.1);border:1px solid var(--red);border-radius:12px;padding:14px;">
+      <div style="font-size:14px;color:var(--text);margin-bottom:10px;">${tb.reason}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        ${tb.players.map(id=>{const col=tPCol(id);return `<div style="padding:6px 14px;border-radius:20px;background:${col.bg}22;border:1px solid ${col.bg};color:${col.bg};font-weight:700;">${esc(tPName(id))}</div>`}).join('')}
+      </div>
+      <button class="btn large" onclick="startTiebreakMatch()">▶ Pelaa tasaratkaisu</button>
+    </div>`;
+  }
+
+  // KNOCKOUT
+  if(t.phase==='knockout'||t.knockoutMatches?.length>0){
+    html += `<div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:10px 14px 6px;">PUDOTUSPELIT</div>`;
+
+    (t.knockoutMatches||[]).forEach((round,ri)=>{
+      const rNames=['Pudotuspelit','Välierät','Finaali'];
+      const isCurrentRound = ri===t.knockoutRound;
+      const rName = rNames[Math.min(ri, rNames.length-1)];
+      html += `<div style="font-family:var(--fd);font-size:14px;color:${isCurrentRound?'var(--accent)':'var(--muted)'};letter-spacing:2px;padding:4px 14px;">${rName.toUpperCase()} ${ri+1}</div>`;
+      round.forEach((m,mi)=>{
+        const playable = isCurrentRound&&!m.winner&&m.p2!=='bye'&&!t.losersMatch;
+        const score = m.winner?`${m.p1Legs||0}-${m.p2Legs||0}`:'';
+        html += tMatchCard(m.p1, m.p2, m.winner, playable, `startKnockoutMatch(${ri},${mi})`, score);
+      });
+
+      // Losers match for this round
+      if(t.losersMatch&&t.losersMatch.roundIdx===ri){
+        const lm = t.losersMatch;
+        html += `<div style="font-family:var(--fd);font-size:14px;color:var(--red);letter-spacing:2px;padding:4px 14px;">HÄVIÄJIEN OTTELU</div>`;
+        if(lm.winner){
+          html += `<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;padding:12px 14px;text-align:center;font-size:14px;color:var(--accent);">
+            ✓ ${esc(tPName(lm.winner))} jatkaa</div>`;
+        } else {
+          html += `<div style="margin:0 14px 8px;background:rgba(255,51,85,0.08);border:1px solid rgba(255,51,85,0.3);border-radius:12px;padding:14px;">
+            <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Pelaajat: ${lm.players.map(id=>'<span style="color:'+tPCol(id).bg+'">'+esc(tPName(id))+'</span>').join(', ')}</div>
+            <button class="btn large" onclick="startLosersMatch()">▶ Pelaa häviäjien ottelu</button>
+          </div>`;
+        }
+      }
+    });
+  }
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
+      <div class="header-title">Turnaus 🏆 ${t.done?'✓':t.phase==='group'?'(Alkusarja)':'(Pudotuspelit)'}</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
+    ${t.done?
+      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`:
+      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`
+    }`;
+}
+
+function tMatchCard(p1id, p2id, winner, playable, onclick, extra='') {
+  const p1n = tPName(p1id);
+  const p2n = p2id==='bye'?'—':tPName(p2id);
+  const col1 = tPCol(p1id).bg;
+  const col2 = p2id==='bye'?'var(--muted)':tPCol(p2id).bg;
+  return `<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid ${winner?'rgba(0,232,122,0.3)':'var(--border)'};border-radius:12px;overflow:hidden;${playable?'cursor:pointer;':''}" ${playable?'onclick="'+onclick+'"':''}>
+    <div style="display:flex;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border);${winner===p1id?'background:rgba(0,232,122,0.08);':''}">
+      <div style="width:10px;height:10px;border-radius:50%;background:${col1};margin-right:10px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:15px;font-weight:700;color:${winner===p1id?'var(--accent)':'var(--text)'};">${esc(p1n)}</div>
+      ${winner===p1id?'<div style="color:var(--accent);font-size:16px;">✓</div>':''}
+    </div>
+    <div style="display:flex;align-items:center;padding:11px 14px;${winner===p2id?'background:rgba(0,232,122,0.08);':''}">
+      <div style="width:10px;height:10px;border-radius:50%;background:${col2};margin-right:10px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:15px;font-weight:700;color:${winner===p2id?'var(--accent)':'var(--text)'};">${esc(p2n)}</div>
+      ${winner===p2id?'<div style="color:var(--accent);font-size:16px;">✓</div>':''}
+    </div>
+    ${extra?`<div style="text-align:center;padding:6px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);">${extra}</div>`:''}
+    ${playable?`<div style="text-align:center;padding:8px;font-size:13px;color:var(--accent);border-top:1px solid var(--border);">▶ Pelaa ottelu</div>`:''}
+  </div>`;
+}
+
+function startTournamentMatch(matchIdx) {
+  const t = S.tournament;
+  if(t.format==='long') return;
+  const m = t.bracket[t.round][matchIdx];
+  if(!m||m.winner) return;
+  const p1=S.players.find(x=>x.id===m.p1);
+  const p2=S.players.find(x=>x.id===m.p2);
+  if(!p1||!p2) return;
+  t.currentMatch={type:'quick',round:t.round,idx:matchIdx};
+  const cfg = tGetGameConfig(t.legsKnockout||1);
+  const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
+  S.game={type:cfg.type,gameOver:false,winner:null,startTime:Date.now(),currentPlayerIndex:0,currentDarts:[],modifier:null,
+    startScore:isX01?cfg.startScore:0,checkoutMode:cfg.checkoutMode,
+    legs:cfg.legsToWin,legsToWin:cfg.legsToWin,
+    players:[
+      {id:p1.id,name:p1.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+      {id:p2.id,name:p2.name,score:isX01?cfg.startScore:0,history:[],legsWon:0,heatmap:{1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0,11:0,12:0,13:0,14:0,15:0,16:0,17:0,18:0,19:0,20:0,BULL:0,MISS:0}},
+    ],
+    turnStartScore:isX01?cfg.startScore:0,isTournamentMatch:true};
+  nav('game');
+}
+
 function renderTournamentGame() { return renderGame(); }
+
+
 
 // ==================== PLAYER PROFILE ====================
 async function showPlayerProfile(id) {
