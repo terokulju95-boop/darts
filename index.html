@@ -688,7 +688,20 @@ function fmtDuration(sec) {
 }
 
 // ==================== NAV + RENDER ====================
+function saveTournamentLocal() {
+  try {
+    if(S.tournament && (S.tournament.format || S.tournament.players)) {
+      localStorage.setItem('darts_tournament', JSON.stringify(S.tournament));
+    }
+  } catch(e) {}
+}
+
+function clearTournamentLocal() {
+  localStorage.removeItem('darts_tournament');
+}
+
 function nav(screen, extra={}) {
+  saveTournamentLocal();
   S.screen = screen;
   Object.assign(S, extra);
   render();
@@ -740,9 +753,19 @@ function renderHome() {
       <button class="menu-btn" onclick="goStats()">
         <span class="icon">&#128202;</span><span class="label">Tilastot</span><span class="arrow">›</span>
       </button>
+      ${S.tournament && S.tournament.format && !S.tournament.done ? `
+      <button class="menu-btn" onclick="nav('tournament-bracket')" style="border-color:rgba(0,232,122,0.5);background:rgba(0,232,122,0.06);">
+        <span class="icon">⚔️</span>
+        <span class="label" style="color:var(--accent);">Jatka turnausta</span>
+        <span style="font-size:11px;color:var(--muted);">${S.tournament.phase==='group'?'Alkusarja':'Pudotuspelit'}</span>
+        <span class="arrow" style="color:var(--accent);">›</span>
+      </button>
+      <button class="menu-btn" onclick="nav('tournament-setup')" style="border-color:rgba(255,215,0,0.2);color:var(--muted);">
+        <span class="icon">&#127942;</span><span class="label" style="color:var(--muted);">Uusi turnaus</span><span class="arrow" style="color:var(--gold);">›</span>
+      </button>` : `
       <button class="menu-btn" onclick="nav('tournament-setup')" style="border-color:rgba(255,215,0,0.3);">
         <span class="icon">&#127942;</span><span class="label">Turnaus</span><span class="arrow" style="color:var(--gold);">›</span>
-      </button>
+      </button>`}
       <button class="menu-btn" onclick="goLeaderboard()" style="border-color:rgba(68,136,255,0.3);">
         <span class="icon">&#127942;</span><span class="label">Leaderboard</span><span class="arrow" style="color:var(--blue);">›</span>
       </button>
@@ -2722,8 +2745,8 @@ function renderQuickTournamentBracket(div) {
     </div>
     <div style="overflow-y:auto;flex:1;">${html}</div>
     ${t.done?
-      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`:
-      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`
+      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
+      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
     }`;
 }
 
@@ -2802,28 +2825,65 @@ function renderLongTournamentBracket(div) {
   if(tab==='standings') {
     const standings = tSortStandings(t.groupPlayers);
     const dropCount = t.groupPlayers.length===10?2:t.groupPlayers.length===5?1:0;
-    html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:6px 14px 4px;">MITEN SIJOITUS MÄÄRÄYTYI</div>`;
+
+    // Legend
+    html += `<div style="margin:4px 14px 10px;background:rgba(0,232,122,0.06);border:1px solid rgba(0,232,122,0.2);border-radius:10px;padding:10px 14px;">
+      <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px;">Sijoitusjärjestys ratkaistaan näin:</div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div style="font-size:12px;color:var(--text);">1️⃣ <b>Pisteet</b> – voitto=2p, häviö=0p</div>
+        <div style="font-size:12px;color:var(--text);">2️⃣ <b>Erävoitot</b> – jos pisteet tasan</div>
+        <div style="font-size:12px;color:var(--text);">3️⃣ <b>Keskinäinen ottelu</b> – jos erätkin tasan</div>
+        <div style="font-size:12px;color:var(--text);">4️⃣ <b>Arvonta / tasatilannepeli</b> – jos kaikki tasan</div>
+      </div>
+    </div>`;
+
     standings.forEach((s,i)=>{
       const col = tPCol(s.id);
       const elim = dropCount>0 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
-      const above = i>0?standings[i-1]:null;
-      let reason = i===0 ? 'Paras pistemäärä' : (() => {
-        const aS = above;
-        if(s.points!==aS.points) return `Pisteet: ${s.points}p (${aS.id===aS.id?tPName(aS.id):''} ${aS.points}p)`;
-        if(s.legWins!==aS.legWins) return `Erävoitot: ${s.legWins} ev (pisteet tasan ${s.points}p)`;
-        const h2h = tHeadToHead(s.id, aS.id);
-        if(h2h!==0) return `Keskinäinen ottelu (pisteet+erät tasan)`;
-        return `Arvonta / tasatilannepeli`;
-      })();
-      html += `<div style="margin:0 14px 6px;background:rgba(22,22,34,0.8);border:1px solid ${col.bg}33;border-radius:12px;padding:11px 14px;opacity:${elim?0.4:1};">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="font-family:var(--fd);font-size:20px;color:var(--muted);min-width:22px;">${i+1}</div>
+      const medals = ['🥇','🥈','🥉'];
+
+      // Figure out HOW this player beat the one ABOVE them
+      const above = i>0 ? standings[i-1] : null;
+      let howBeat = '';
+      if(above) {
+        if(s.points !== above.points) {
+          howBeat = '';  // Clear points difference - obvious
+        } else if(s.legWins !== above.legWins) {
+          howBeat = `🏅 Erävoitot ratkaisivat – ${tPName(s.id)}: ${s.legWins}ev vs ${tPName(above.id)}: ${above.legWins}ev`;
+        } else {
+          const h2h = tHeadToHead(s.id, above.id);
+          if(h2h !== 0) howBeat = `⚔️ Keskinäinen ottelu ratkaisi (pisteet ja erät olivat tasan)`;
+          else howBeat = `🎲 Arvonta / tasatilannepeli ratkaisi`;
+        }
+      }
+
+      // Check if this player tied with the one BELOW (show why they're ahead)
+      const below = standings[i+1];
+      let tiedWithBelow = '';
+      if(below && s.points===below.points) {
+        if(s.legWins !== below.legWins) {
+          tiedWithBelow = `Pisteet tasan (${s.points}p) – erävoitot ratkaisevat`;
+        } else {
+          const h2h2 = tHeadToHead(s.id, below.id);
+          if(h2h2 !== 0) tiedWithBelow = `Pisteet+erät tasan – keskinäinen ottelu ratkaisi`;
+          else tiedWithBelow = `Kaikki tasan – arvonta/tasatilannepeli ratkaisi`;
+        }
+      }
+
+      const cutAbove = dropCount>0 && i===standings.length-dropCount;
+      html += `${cutAbove ? `<div style="display:flex;align-items:center;gap:8px;margin:4px 14px 4px;padding:5px 10px;background:rgba(255,51,85,0.08);border-radius:8px;border:1px dashed rgba(255,51,85,0.4);"><span style="font-size:12px;color:var(--red);">✂️ Pudotusraja – alla putoavat pois</span></div>` : ''}
+      <div style="margin:0 14px 5px;background:rgba(22,22,34,0.85);border:1px solid ${elim?'rgba(255,51,85,0.2)':col.bg+'33'};border-radius:12px;overflow:hidden;opacity:${elim?0.4:1};">
+        <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;">
+          <div style="font-size:${i<3?'22':'16'}px;min-width:28px;text-align:center;">${medals[i]||i+1}</div>
           <div style="width:10px;height:10px;border-radius:50%;background:${col.bg};flex-shrink:0;"></div>
-          <div style="flex:1;font-size:14px;font-weight:700;color:${col.bg};">${esc(tPName(s.id))}${elim?' (pudonnut)':''}</div>
-          <div style="font-family:var(--fd);font-size:18px;color:var(--accent);">${s.points||0}p</div>
+          <div style="flex:1;font-weight:700;font-size:15px;color:${elim?'rgba(255,255,255,0.3)':col.bg};">${esc(tPName(s.id))}${elim?` <span style="font-size:12px;color:var(--red);">✗ pudonnut</span>`:''}</div>
+          <div style="text-align:right;">
+            <div style="font-family:var(--fd);font-size:22px;color:var(--accent);">${s.points||0}<span style="font-size:11px;color:var(--muted);">p</span></div>
+            <div style="font-size:10px;color:var(--muted);">${s.legWins||0}ev · ${s.played||0} ottelua</div>
+          </div>
         </div>
-        <div style="font-size:12px;color:var(--muted);padding-left:32px;margin-top:4px;">📍 ${reason}</div>
-        <div style="font-size:11px;color:var(--muted);padding-left:32px;margin-top:1px;">Pelattu:${s.played||0} · EV:${s.legWins||0} · EH:${s.legLosses||0}</div>
+        ${howBeat ? `<div style="padding:5px 14px 8px;padding-left:50px;font-size:12px;color:rgba(255,200,80,0.9);border-top:1px solid var(--border);">${howBeat}</div>` : ''}
+        ${tiedWithBelow ? `<div style="padding:4px 14px 7px;padding-left:50px;font-size:11px;color:rgba(255,165,50,0.7);">⚠️ ${tiedWithBelow}</div>` : ''}
       </div>`;
     });
     // Head-to-head ristikko
@@ -2935,8 +2995,8 @@ function renderLongTournamentBracket(div) {
     ${tabs}
     <div style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
     ${t.done?
-      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`:
-      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;nav('home');}">Lopeta turnaus</button></div>`
+      `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
+      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
     }`;
 }
 
@@ -3453,6 +3513,14 @@ async function init() {
         S.screen = 'game';
       }
     } catch(e) { localStorage.removeItem('darts_game'); }
+    // Restore in-progress tournament
+    try {
+      const savedT = localStorage.getItem('darts_tournament');
+      if (savedT && !S.game) {
+        const t = JSON.parse(savedT);
+        if(t && t.format) { S.tournament = t; }
+      }
+    } catch(e) { localStorage.removeItem('darts_tournament'); }
     // Load players from Firebase
     await loadPlayers();
     render();
