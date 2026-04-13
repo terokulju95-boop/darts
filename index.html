@@ -2147,10 +2147,10 @@ function testFb() {
 // ---- SETUP ----
 function renderTournamentSetup() {
   const div = el('div','screen');
-  if(!S.tournament) S.tournament = {players:[], format:'quick', gameType:'501', checkoutMode:'double', legsGroup:1, legsKnockout:2, legsSpecial:1};
+  if(!S.tournament) S.tournament = {players:[], format:'long', gameType:'501', checkoutMode:'double', legsGroup:1, legsKnockout:2, legsSpecial:1};
   const t = S.tournament;
   const sel = t.players||[];
-  const format = t.format||'quick';
+  const format = 'long';
 
   const cards = S.players.map((p,idx)=>{
     const on = sel.includes(p.id);
@@ -2183,14 +2183,7 @@ function renderTournamentSetup() {
     </div>
     <div style="overflow-y:auto;flex:1;padding-bottom:20px;">
       <div class="config-section">
-        <div class="config-label">Turnausmuoto</div>
-        <div class="option-row">
-          ${optBtn('quick','⚡ Nopea')}
-          ${optBtn('long','🏆 Pitkä (alkusarja + pudotuspelit)')}
-        </div>
-        <div style="margin-top:8px;font-size:12px;color:var(--muted);">
-          ${format==='quick'?'Suorat pudotuspelit, arvotut parit. Nopea.':'Kaikki pelaa kaikkia, sitten pudotuspelit seedauksen mukaan. Max 10 pelaajaa.'}
-        </div>
+        <div style="font-size:12px;color:var(--muted);">Alkusarja (kaikki pelaa kaikkia) → pudotuspelit seedauksen mukaan. Max 10 pelaajaa.</div>
       </div>
 
       <div class="config-section">
@@ -2219,7 +2212,6 @@ function renderTournamentSetup() {
         ${legsRow('legsSpecial','Legit erikoisottelussa (1v1v1)')}
       </div>`:`
       <div class="config-section">
-        ${legsRow('legsKnockout','Legit per ottelu')}
       </div>`}
 
       <div style="padding:14px;">
@@ -2234,7 +2226,7 @@ function renderTournamentSetup() {
 }
 
 function setTConfig(k,v) {
-  if(!S.tournament) S.tournament={players:[],format:'quick',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
+  if(!S.tournament) S.tournament={players:[],format:'long',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
   S.tournament[k]=v;
   // Update option buttons in-place without full render (prevents scroll jump)
   document.querySelectorAll('[data-tconfig-key="'+k+'"]').forEach(btn=>{
@@ -2244,7 +2236,7 @@ function setTConfig(k,v) {
 }
 
 function toggleTournamentPlayer(id) {
-  if(!S.tournament) S.tournament={players:[],format:'quick',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
+  if(!S.tournament) S.tournament={players:[],format:'long',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
   const arr=S.tournament.players;
   const i=arr.indexOf(id);
   if(i===-1) arr.push(id); else arr.splice(i,1);
@@ -2253,9 +2245,7 @@ function toggleTournamentPlayer(id) {
 
 // ---- START ----
 function startTournament() {
-  const t = S.tournament;
-  if(t.format==='long') startLongTournament();
-  else startQuickTournament();
+  startLongTournament();
 }
 
 function startQuickTournament() {
