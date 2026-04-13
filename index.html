@@ -2348,30 +2348,46 @@ function tBuildKnockout() {
   const t = S.tournament;
   const sorted = tSortStandings(t.groupPlayers);
   let advancing = sorted.map(s=>s.id);
+  const n = t.groupPlayers.length;
 
-  // 10 players: drop 2 worst
-  if(t.groupPlayers.length===10) {
-    // Check if 3+ tied for spots 8-10 → need tiebreak match
-    const bottom3 = advancing.slice(7);
-    const s8=t.groupStandings.find(s=>s.id===bottom3[0]);
-    const s9=t.groupStandings.find(s=>s.id===bottom3[1]);
-    const s10=t.groupStandings.find(s=>s.id===bottom3[2]);
-    const allTied = s8&&s9&&s10&&s8.points===s9.points&&s9.points===s10.points&&s8.legWins===s9.legWins&&s9.legWins===s10.legWins;
-    if(allTied) {
-      // Need 3-player tiebreak - only 1 can advance
-      t.tiebreakNeeded = {players:bottom3, reason:'Kolmen pelaajan tasatilanne - pelataan 1v1v1', advanceCount:1};
+  // 10 players: drop 2 worst; 5 players: drop 1 worst
+  const dropCount = n===10 ? 2 : n===5 ? 1 : 0;
+
+  if(dropCount > 0) {
+    const cutStart = advancing.length - dropCount - 1; // first potentially dropped index
+    // Gather players in the drop zone + one above (to check ties)
+    const dropZone = advancing.slice(advancing.length - dropCount - 1);
+
+    // Check if 3+ players in drop zone are all tied
+    const dropStats = dropZone.map(id=>t.groupStandings.find(s=>s.id===id)||{id,points:0,legWins:0});
+    const allTied3 = dropZone.length >= 3 &&
+      dropStats.every(s=>s.points===dropStats[0].points && s.legWins===dropStats[0].legWins) &&
+      !tAnyHeadToHeadDifference(dropZone);
+    if(allTied3) {
+      // If we need to drop dropCount players and all in dropZone are tied → play tiebreak
+      // dropCount+1 players play, dropCount lose
+      const reason = dropZone.length===3 ? 'Kolmen pelaajan tasatilanne - pelataan 1v1v1' :
+        dropZone.length===2 ? 'Tasatilanne - ratkaistaan darts-pelillä' :
+        dropZone.length+' pelaajan tasatilanne';
+      t.tiebreakNeeded = {players:dropZone, reason, dropCount};
       nav('tournament-bracket');
       return;
     }
-    // Check if spots 9-10 tied
-    const s9b=t.groupStandings.find(s=>s.id===advancing[8]);
-    const s10b=t.groupStandings.find(s=>s.id===advancing[9]);
-    if(s9b&&s10b&&s9b.points===s10b.points&&s9b.legWins===s10b.legWins&&tHeadToHead(advancing[8],advancing[9])===0) {
-      t.tiebreakNeeded = {players:[advancing[8],advancing[9]], reason:'Tasatilanne - ratkaistaan darts-pelillä', advanceCount:0};
-      nav('tournament-bracket');
-      return;
+
+    // Check if exactly the last dropCount+1 spots are tied (border case)
+    const borderPlayers = advancing.slice(advancing.length - dropCount - 1, advancing.length - dropCount + 1);
+    if(borderPlayers.length >= 2) {
+      const bs = borderPlayers.map(id=>t.groupStandings.find(s=>s.id===id)||{id,points:0,legWins:0});
+      const borderTied = bs.every(s=>s.points===bs[0].points && s.legWins===bs[0].legWins) &&
+        tHeadToHead(borderPlayers[0], borderPlayers[1])===0;
+      if(borderTied) {
+        t.tiebreakNeeded = {players:borderPlayers, reason:'Tasatilanne - ratkaistaan darts-pelillä', dropCount:1};
+        nav('tournament-bracket');
+        return;
+      }
     }
-    advancing = advancing.slice(0,8);
+
+    advancing = advancing.slice(0, advancing.length - dropCount);
   }
 
   t.knockoutPlayers = advancing;
@@ -2380,6 +2396,15 @@ function tBuildKnockout() {
   t.phase = 'knockout';
   t.losersMatch = null;
   nav('tournament-bracket');
+}
+
+function tAnyHeadToHeadDifference(players) {
+  for(let i=0;i<players.length;i++){
+    for(let j=i+1;j<players.length;j++){
+      if(tHeadToHead(players[i],players[j])!==0) return true;
+    }
+  }
+  return false;
 }
 
 function tBuildKnockoutRound(players) {
@@ -2571,11 +2596,15 @@ function tournamentMatchDone(winnerId) {
   // Tiebreak
   if(cm.type==='tiebreak') {
     const tb = t.tiebreakNeeded;
+    const dropCount = tb.dropCount !== undefined ? tb.dropCount : (t.groupPlayers.length===10?2:1);
+    // Winner(s) advance, rest drop
+    // In a multi-player tiebreak: only 1 winner, dropCount losers
     const losers = tb.players.filter(id=>id!==winnerId);
-    // Remove losers from standings order
     const sorted = tSortStandings(t.groupPlayers);
     let advancing = sorted.map(s=>s.id).filter(id=>!losers.includes(id));
-    if(t.groupPlayers.length===10) advancing=advancing.slice(0,8);
+    // Apply normal drop limit
+    const totalDrop = t.groupPlayers.length===10 ? 2 : t.groupPlayers.length===5 ? 1 : 0;
+    if(totalDrop>0) advancing = advancing.slice(0, t.groupPlayers.length - totalDrop);
     t.tiebreakNeeded = null;
     t.knockoutPlayers = advancing;
     t.knockoutMatches = [tBuildKnockoutRound(advancing)];
@@ -2721,7 +2750,8 @@ function renderLongTournamentBracket(div) {
     </div>
     ${standings.map((s,i)=>{
       const col = tPCol(s.id);
-      const eliminated = t.groupPlayers.length===10 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
+      const dropCount = t.groupPlayers.length===10?2:t.groupPlayers.length===5?1:0;
+      const eliminated = dropCount>0 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
       return `<div style="display:grid;grid-template-columns:24px 1fr 40px 40px 40px;gap:0;padding:9px 12px;border-bottom:1px solid var(--border);opacity:${eliminated?0.35:1};background:${i===0?col.bg+'18':'transparent'};">
         <div style="font-family:var(--fd);font-size:16px;color:var(--muted);">${i+1}</div>
         <div style="font-size:14px;font-weight:700;color:${col.bg};">${esc(tPName(s.id))}</div>
