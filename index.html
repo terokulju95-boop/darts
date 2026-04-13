@@ -2141,13 +2141,13 @@ function renderTournamentSetup() {
   }).join('');
 
   const optBtn = (val, label, key='format') =>
-    `<button class="option-btn ${t[key]===val?'selected':''}" onclick="setTConfig('${key}','${val}');render()">${label}</button>`;
+    `<button class="option-btn ${t[key]===val?'selected':''}" data-tconfig-key="${key}" data-tconfig-val="${val}" onclick="setTConfig('${key}','${val}')">${label}</button>`;
 
   const legsRow = (key, label) => `
     <div style="margin-bottom:10px;">
       <div class="config-label">${label}</div>
       <div class="option-row">
-        ${[1,2,3,4,5].map(n=>`<button class="option-btn ${t[key]===n?'selected':''}" onclick="setTConfig('${key}',${n});render()">${n}</button>`).join('')}
+        ${[1,2,3,4,5].map(n=>`<button class="option-btn ${t[key]===n?'selected':''}" data-tconfig-key="${key}" data-tconfig-val="${n}" onclick="setTConfig('${key}',${n})">${n}</button>`).join('')}
       </div>
     </div>`;
 
@@ -2178,14 +2178,14 @@ function renderTournamentSetup() {
       <div class="config-section">
         <div class="config-label">Pelityyppi</div>
         <div class="option-row">
-          ${['501','301','701','cricket','atc','custom_x01'].map(g=>`<button class="option-btn ${t.gameType===g?'selected':''}" onclick="setTConfig('gameType','${g}');render()">${g==='cricket'?'Cricket':g==='atc'?'ATC':g==='custom_x01'?'Oma X01':g}</button>`).join('')}
+          ${['501','301','701','cricket','atc','custom_x01'].map(g=>`<button class="option-btn ${t.gameType===g?'selected':''}" data-tconfig-key="gameType" data-tconfig-val="${g}" onclick="setTConfig('gameType','${g}')">${g==='cricket'?'Cricket':g==='atc'?'ATC':g==='custom_x01'?'Oma X01':g}</button>`).join('')}
         </div>
       </div>
 
       <div class="config-section">
         <div class="config-label">Lopetustapa (X01-peleissä)</div>
         <div class="option-row">
-          ${[['double','Double Out'],['single','Single Out'],['master','Master Out'],['any','Vapaa']].map(([v,l])=>`<button class="option-btn ${t.checkoutMode===v?'selected':''}" onclick="setTConfig('checkoutMode','${v}');render()">${l}</button>`).join('')}
+          ${[['double','Double Out'],['single','Single Out'],['master','Master Out'],['any','Vapaa']].map(([v,l])=>`<button class="option-btn ${t.checkoutMode===v?'selected':''}" data-tconfig-key="checkoutMode" data-tconfig-val="${v}" onclick="setTConfig('checkoutMode','${v}')">${l}</button>`).join('')}
         </div>
       </div>
 
@@ -2213,6 +2213,11 @@ function renderTournamentSetup() {
 function setTConfig(k,v) {
   if(!S.tournament) S.tournament={players:[],format:'quick',gameType:'501',checkoutMode:'double',legsGroup:1,legsKnockout:2,legsSpecial:1};
   S.tournament[k]=v;
+  // Update option buttons in-place without full render (prevents scroll jump)
+  document.querySelectorAll('[data-tconfig-key="'+k+'"]').forEach(btn=>{
+    const isSelected = String(btn.getAttribute('data-tconfig-val')) === String(v);
+    btn.className = 'option-btn' + (isSelected?' selected':'');
+  });
 }
 
 function toggleTournamentPlayer(id) {
@@ -2731,10 +2736,11 @@ function renderLongTournamentBracket(div) {
   const pending = t.groupMatches.filter(m=>!m.played);
   const done = t.groupMatches.filter(m=>m.played);
   if(pending.length>0 && t.phase==='group'){
-    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">SEURAAVA OTTELU</div>`;
-    const next = pending[0];
-    const mi = t.groupMatches.indexOf(next);
-    html += tMatchCard(next.p1, next.p2, null, true, `startGroupMatch(${mi})`, `${pending.length} ottelua jäljellä`);
+    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">PELAAMATTOMAT OTTELUT (${pending.length})</div>`;
+    pending.forEach(m=>{
+      const mi = t.groupMatches.indexOf(m);
+      html += tMatchCard(m.p1, m.p2, null, true, `startGroupMatch(${mi})`);
+    });
   }
   if(done.length>0){
     html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">PELATUT OTTELUT</div>`;
