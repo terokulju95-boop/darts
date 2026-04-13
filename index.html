@@ -2729,106 +2729,210 @@ function renderQuickTournamentBracket(div) {
 
 function renderLongTournamentBracket(div) {
   const t = S.tournament;
-  let html = '';
+  const tab = t._tab || (t.phase==='group'?'group':'knockout');
+  if(!t._tab) t._tab = tab;
+  const hasKnockout = t.phase==='knockout' || (t.knockoutMatches&&t.knockoutMatches.length>0);
 
-  if(t.done&&t.champion){
-    html += `<div style="text-align:center;padding:20px;">
-      <div style="font-size:56px;">🏆</div>
-      <div style="font-family:var(--fd);font-size:38px;color:var(--gold);">${esc(tPName(t.champion))}</div>
-      <div style="color:var(--muted);font-size:13px;margin-top:4px;">TURNAUKSEN VOITTAJA</div>
-    </div>`;
-  }
+  const tabBtn = (id, label, active) =>
+    `<button onclick="S.tournament._tab='${id}';render()" style="flex:1;padding:8px 2px;border-radius:8px;font-family:var(--fu);font-size:13px;font-weight:700;cursor:pointer;border:1px solid ${active?'var(--accent)':'var(--border)'};background:${active?'var(--accent)':'var(--card)'};color:${active?'#000':'var(--text)'};">${label}</button>`;
 
-  // GROUP STAGE
-  html += `<div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:10px 14px 6px;">ALKUSARJA</div>`;
-
-  // Standings table
-  const standings = tSortStandings(t.groupPlayers);
-  html += `<div style="margin:0 14px 12px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-    <div style="display:grid;grid-template-columns:24px 1fr 40px 40px 40px;gap:0;padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);letter-spacing:1px;">
-      <div>#</div><div>PELAAJA</div><div style="text-align:center;">P</div><div style="text-align:center;">EV</div><div style="text-align:center;">PTS</div>
-    </div>
-    ${standings.map((s,i)=>{
-      const col = tPCol(s.id);
-      const dropCount = t.groupPlayers.length===10?2:t.groupPlayers.length===5?1:0;
-      const eliminated = dropCount>0 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
-      return `<div style="display:grid;grid-template-columns:24px 1fr 40px 40px 40px;gap:0;padding:9px 12px;border-bottom:1px solid var(--border);opacity:${eliminated?0.35:1};background:${i===0?col.bg+'18':'transparent'};">
-        <div style="font-family:var(--fd);font-size:16px;color:var(--muted);">${i+1}</div>
-        <div style="font-size:14px;font-weight:700;color:${col.bg};">${esc(tPName(s.id))}</div>
-        <div style="text-align:center;font-size:13px;">${s.played||0}</div>
-        <div style="text-align:center;font-size:13px;">${s.legWins||0}</div>
-        <div style="text-align:center;font-family:var(--fd);font-size:16px;color:var(--accent);">${s.points||0}</div>
-      </div>`;
-    }).join('')}
+  const tabs = `<div style="display:flex;gap:5px;padding:8px 14px 4px;flex-shrink:0;">
+    ${tabBtn('group','⚽ Alkusarja', tab==='group')}
+    ${tabBtn('standings','📊 Sijoitukset', tab==='standings')}
+    ${hasKnockout ? tabBtn('knockout','🥊 Pudotuspelit', tab==='knockout') : ''}
+    ${hasKnockout ? tabBtn('bracket','🗂 Kaavio', tab==='bracket') : ''}
   </div>`;
 
-  // Group matches
-  const pending = t.groupMatches.filter(m=>!m.played);
-  const done = t.groupMatches.filter(m=>m.played);
-  if(pending.length>0 && t.phase==='group'){
-    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">PELAAMATTOMAT OTTELUT (${pending.length})</div>`;
-    pending.forEach(m=>{
-      const mi = t.groupMatches.indexOf(m);
-      html += tMatchCard(m.p1, m.p2, null, true, `startGroupMatch(${mi})`);
-    });
-  }
-  if(done.length>0){
-    html += `<div style="font-family:var(--fd);font-size:14px;color:var(--muted);letter-spacing:2px;padding:4px 14px;">PELATUT OTTELUT</div>`;
-    done.slice().reverse().forEach(m=>{
-      html += tMatchCard(m.p1, m.p2, m.winner, false, '', `${m.p1Legs||0}-${m.p2Legs||0}`);
-    });
-  }
-
-  // Tiebreak needed
-  if(t.tiebreakNeeded){
-    const tb = t.tiebreakNeeded;
-    html += `<div style="font-family:var(--fd);font-size:18px;color:var(--red);letter-spacing:2px;padding:10px 14px 6px;">TASATILANNE!</div>`;
-    html += `<div style="margin:0 14px 8px;background:rgba(255,51,85,0.1);border:1px solid var(--red);border-radius:12px;padding:14px;">
-      <div style="font-size:14px;color:var(--text);margin-bottom:10px;">${tb.reason}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-        ${tb.players.map(id=>{const col=tPCol(id);return `<div style="padding:6px 14px;border-radius:20px;background:${col.bg}22;border:1px solid ${col.bg};color:${col.bg};font-weight:700;">${esc(tPName(id))}</div>`}).join('')}
-      </div>
-      <button class="btn large" onclick="startTiebreakMatch()">▶ Pelaa tasaratkaisu</button>
+  let html = '';
+  if(t.done && t.champion) {
+    html += `<div style="text-align:center;padding:14px 14px 6px;">
+      <div style="font-size:48px;">🏆</div>
+      <div style="font-family:var(--fd);font-size:34px;color:var(--gold);">${esc(tPName(t.champion))}</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">TURNAUKSEN VOITTAJA</div>
     </div>`;
   }
 
-  // KNOCKOUT
-  if(t.phase==='knockout'||t.knockoutMatches?.length>0){
-    html += `<div style="font-family:var(--fd);font-size:18px;color:var(--accent);letter-spacing:2px;padding:10px 14px 6px;">PUDOTUSPELIT</div>`;
+  // ===== TAB: ALKUSARJA =====
+  if(tab==='group') {
+    const standings = tSortStandings(t.groupPlayers);
+    const dropCount = t.groupPlayers.length===10?2:t.groupPlayers.length===5?1:0;
+    html += `<div style="font-size:11px;color:var(--muted);padding:2px 14px 6px;">V=Voitto(2p) · EV=Erävoitot · PTS=Pisteet</div>`;
+    html += `<div style="margin:0 14px 10px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:26px 1fr 34px 34px 38px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);letter-spacing:1px;">
+        <div>#</div><div>PELAAJA</div><div style="text-align:center;">P</div><div style="text-align:center;">EV</div><div style="text-align:center;">PTS</div>
+      </div>
+      ${standings.map((s,i)=>{
+        const col = tPCol(s.id);
+        const elim = dropCount>0 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
+        const cutline = dropCount>0 && !elim && i===standings.length-dropCount-1;
+        return (cutline?`<div style="border-top:2px dashed rgba(255,51,85,0.5);"></div>`:'') +
+        `<div style="display:grid;grid-template-columns:26px 1fr 34px 34px 38px;padding:9px 12px;border-bottom:1px solid var(--border);opacity:${elim?0.3:1};background:${i===0&&!elim?col.bg+'15':''};">
+          <div style="font-family:var(--fd);font-size:15px;color:${elim?'var(--red)':'var(--muted)'};">${i+1}</div>
+          <div style="font-size:14px;font-weight:700;color:${elim?'rgba(255,255,255,0.3)':col.bg};">${esc(tPName(s.id))}${elim?' ✗':''}</div>
+          <div style="text-align:center;font-size:13px;">${s.played||0}</div>
+          <div style="text-align:center;font-size:13px;">${s.legWins||0}</div>
+          <div style="text-align:center;font-family:var(--fd);font-size:16px;color:var(--accent);">${s.points||0}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
 
-    (t.knockoutMatches||[]).forEach((round,ri)=>{
-      const rNames=['Pudotuspelit','Välierät','Finaali'];
-      const isCurrentRound = ri===t.knockoutRound;
-      const rName = rNames[Math.min(ri, rNames.length-1)];
-      html += `<div style="font-family:var(--fd);font-size:14px;color:${isCurrentRound?'var(--accent)':'var(--muted)'};letter-spacing:2px;padding:4px 14px;">${rName.toUpperCase()} ${ri+1}</div>`;
-      round.forEach((m,mi)=>{
-        const playable = isCurrentRound&&!m.winner&&m.p2!=='bye'&&!t.losersMatch;
-        const score = m.winner?`${m.p1Legs||0}-${m.p2Legs||0}`:'';
-        html += tMatchCard(m.p1, m.p2, m.winner, playable, `startKnockoutMatch(${ri},${mi})`, score);
-      });
+    if(t.tiebreakNeeded){
+      const tb = t.tiebreakNeeded;
+      html += `<div style="margin:0 14px 8px;background:rgba(255,51,85,0.1);border:1px solid var(--red);border-radius:12px;padding:14px;">
+        <div style="font-family:var(--fd);font-size:15px;color:var(--red);margin-bottom:6px;">⚡ TASATILANNE</div>
+        <div style="font-size:13px;color:var(--text);margin-bottom:10px;">${tb.reason}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">${tb.players.map(id=>{const c=tPCol(id);return `<div style="padding:5px 12px;border-radius:20px;background:${c.bg}22;border:1px solid ${c.bg};color:${c.bg};font-weight:700;font-size:13px;">${esc(tPName(id))}</div>`;}).join('')}</div>
+        <button class="btn large" onclick="startTiebreakMatch()">▶ Pelaa tasaratkaisu</button>
+      </div>`;
+    }
 
-      // Losers match for this round
-      if(t.losersMatch&&t.losersMatch.roundIdx===ri){
-        const lm = t.losersMatch;
-        html += `<div style="font-family:var(--fd);font-size:14px;color:var(--red);letter-spacing:2px;padding:4px 14px;">HÄVIÄJIEN OTTELU</div>`;
-        if(lm.winner){
-          html += `<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;padding:12px 14px;text-align:center;font-size:14px;color:var(--accent);">
-            ✓ ${esc(tPName(lm.winner))} jatkaa</div>`;
-        } else {
-          html += `<div style="margin:0 14px 8px;background:rgba(255,51,85,0.08);border:1px solid rgba(255,51,85,0.3);border-radius:12px;padding:14px;">
-            <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Pelaajat: ${lm.players.map(id=>'<span style="color:'+tPCol(id).bg+'">'+esc(tPName(id))+'</span>').join(', ')}</div>
-            <button class="btn large" onclick="startLosersMatch()">▶ Pelaa häviäjien ottelu</button>
-          </div>`;
-        }
-      }
-    });
+    const pending = t.groupMatches.filter(m=>!m.played);
+    const done = t.groupMatches.filter(m=>m.played);
+    if(pending.length>0 && t.phase==='group'){
+      html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:6px 14px 3px;">PELAAMATTOMAT (${pending.length}/${t.groupMatches.length})</div>`;
+      pending.forEach(m=>{ const mi=t.groupMatches.indexOf(m); html+=tMatchCard(m.p1,m.p2,null,true,`startGroupMatch(${mi})`); });
+    }
+    if(done.length>0){
+      html += `<div style="font-family:var(--fd);font-size:13px;color:var(--muted);letter-spacing:2px;padding:6px 14px 3px;">PELATUT (${done.length})</div>`;
+      done.slice().reverse().forEach(m=>{ html+=tMatchCard(m.p1,m.p2,m.winner,false,'',`${m.p1Legs||0}-${m.p2Legs||0}`); });
+    }
   }
 
-  div.innerHTML = `
+  // ===== TAB: SIJOITUKSET =====
+  if(tab==='standings') {
+    const standings = tSortStandings(t.groupPlayers);
+    const dropCount = t.groupPlayers.length===10?2:t.groupPlayers.length===5?1:0;
+    html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:6px 14px 4px;">MITEN SIJOITUS MÄÄRÄYTYI</div>`;
+    standings.forEach((s,i)=>{
+      const col = tPCol(s.id);
+      const elim = dropCount>0 && t.phase==='knockout' && !t.knockoutPlayers.includes(s.id);
+      const above = i>0?standings[i-1]:null;
+      let reason = i===0 ? 'Paras pistemäärä' : (() => {
+        const aS = above;
+        if(s.points!==aS.points) return `Pisteet: ${s.points}p (${aS.id===aS.id?tPName(aS.id):''} ${aS.points}p)`;
+        if(s.legWins!==aS.legWins) return `Erävoitot: ${s.legWins} ev (pisteet tasan ${s.points}p)`;
+        const h2h = tHeadToHead(s.id, aS.id);
+        if(h2h!==0) return `Keskinäinen ottelu (pisteet+erät tasan)`;
+        return `Arvonta / tasatilannepeli`;
+      })();
+      html += `<div style="margin:0 14px 6px;background:rgba(22,22,34,0.8);border:1px solid ${col.bg}33;border-radius:12px;padding:11px 14px;opacity:${elim?0.4:1};">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-family:var(--fd);font-size:20px;color:var(--muted);min-width:22px;">${i+1}</div>
+          <div style="width:10px;height:10px;border-radius:50%;background:${col.bg};flex-shrink:0;"></div>
+          <div style="flex:1;font-size:14px;font-weight:700;color:${col.bg};">${esc(tPName(s.id))}${elim?' (pudonnut)':''}</div>
+          <div style="font-family:var(--fd);font-size:18px;color:var(--accent);">${s.points||0}p</div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);padding-left:32px;margin-top:4px;">📍 ${reason}</div>
+        <div style="font-size:11px;color:var(--muted);padding-left:32px;margin-top:1px;">Pelattu:${s.played||0} · EV:${s.legWins||0} · EH:${s.legLosses||0}</div>
+      </div>`;
+    });
+    // Head-to-head ristikko
+    const pls = t.groupPlayers;
+    if(t.groupMatches.some(m=>m.played)){
+      html += `<div style="font-family:var(--fd);font-size:13px;color:var(--muted);letter-spacing:2px;padding:10px 14px 4px;">KESKINÄISET TULOKSET</div>`;
+      html += `<div style="margin:0 14px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch;"><table style="border-collapse:collapse;font-size:12px;width:100%;">`;
+      html += `<tr><td style="padding:5px 6px;"></td>${pls.map(id=>`<td style="padding:5px 6px;text-align:center;font-weight:700;color:${tPCol(id).bg};">${esc(tPName(id).slice(0,6))}</td>`).join('')}</tr>`;
+      pls.forEach(r=>{
+        const rc=tPCol(r).bg;
+        html+=`<tr><td style="padding:5px 6px;font-weight:700;color:${rc};white-space:nowrap;">${esc(tPName(r).slice(0,8))}</td>`;
+        pls.forEach(c=>{
+          if(r===c){html+=`<td style="padding:5px 6px;text-align:center;color:var(--muted);">—</td>`;return;}
+          const m=t.groupMatches.find(m=>(m.p1===r&&m.p2===c)||(m.p1===c&&m.p2===r));
+          if(!m||!m.played){html+=`<td style="padding:5px 6px;text-align:center;color:var(--muted);">·</td>`;return;}
+          const won=m.winner===r;
+          const rl=m.p1===r?m.p1Legs:m.p2Legs;
+          const cl=m.p1===r?m.p2Legs:m.p1Legs;
+          html+=`<td style="padding:5px 6px;text-align:center;font-weight:700;color:${won?'var(--accent)':'var(--red)'};">${rl}-${cl}</td>`;
+        });
+        html+=`</tr>`;
+      });
+      html+=`</table></div>`;
+    }
+  }
+
+  // ===== TAB: PUDOTUSPELIT =====
+  if(tab==='knockout') {
+    if(!hasKnockout){
+      html+='<div class="empty-state"><span class="ei">⏳</span><p>Pudotuspelit alkavat alkusarjan jälkeen.</p></div>';
+    } else {
+      const roundNames=['1. Kierros','Puolivälierät','Välierät','Finaali'];
+      (t.knockoutMatches||[]).forEach((round,ri)=>{
+        const isActive=ri===t.knockoutRound;
+        const rName=roundNames[Math.min(ri,roundNames.length-1)];
+        html+=`<div style="font-family:var(--fd);font-size:15px;color:${isActive?'var(--accent)':'var(--muted)'};letter-spacing:2px;padding:8px 14px 4px;">${rName.toUpperCase()}</div>`;
+        round.forEach((m,mi)=>{
+          const playable=isActive&&!m.winner&&m.p2!=='bye'&&!t.losersMatch;
+          html+=tMatchCard(m.p1,m.p2,m.winner,playable,`startKnockoutMatch(${ri},${mi})`,m.winner?`${m.p1Legs||0}-${m.p2Legs||0}`:'');
+        });
+        if(t.losersMatch&&t.losersMatch.roundIdx===ri){
+          const lm=t.losersMatch;
+          html+=`<div style="font-family:var(--fd);font-size:13px;color:var(--red);letter-spacing:2px;padding:4px 14px;">HÄVIÄJIEN OTTELU</div>`;
+          if(lm.winner){
+            html+=`<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;padding:11px 14px;text-align:center;font-size:14px;color:var(--accent);">✓ ${esc(tPName(lm.winner))} jatkaa</div>`;
+          } else {
+            html+=`<div style="margin:0 14px 8px;background:rgba(255,51,85,0.08);border:1px solid rgba(255,51,85,0.3);border-radius:12px;padding:14px;">
+              <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">${lm.players.map(id=>'<span style="color:'+tPCol(id).bg+'">'+esc(tPName(id))+'</span>').join(' vs ')}</div>
+              <button class="btn large" onclick="startLosersMatch()">▶ Pelaa häviäjien ottelu</button>
+            </div>`;
+          }
+        }
+      });
+    }
+  }
+
+  // ===== TAB: KAAVIO =====
+  if(tab==='bracket') {
+    if(!hasKnockout){
+      html+='<div class="empty-state"><span class="ei">🗂</span><p>Kaavio näkyy pudotuspelien alettua.</p></div>';
+    } else {
+      const rounds=t.knockoutMatches||[];
+      html+=`<div style="font-size:11px;color:var(--muted);padding:4px 14px 6px;">Vaaka: kierros vasemmalta oikealle</div>`;
+      html+=`<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:4px 14px 20px;">`;
+      html+=`<div style="display:flex;gap:10px;min-width:${(rounds.length+(t.done?1:0))*130}px;align-items:flex-start;">`;
+      const roundNames2=['1. kierros','Puolivälierät','Välierät','Finaali'];
+      rounds.forEach((round,ri)=>{
+        const isActive=ri===t.knockoutRound;
+        const rName=roundNames2[Math.min(ri,roundNames2.length-1)];
+        const spacer=ri===0?0:(Math.pow(2,ri)-1)*68;
+        html+=`<div style="flex:0 0 120px;">
+          <div style="font-size:10px;color:${isActive?'var(--accent)':'var(--muted)'};letter-spacing:1px;margin-bottom:6px;text-align:center;">${rName.toUpperCase()}</div>`;
+        round.forEach((m,mi)=>{
+          if(mi>0) html+=`<div style="height:${spacer}px;"></div>`;
+          const c1=tPCol(m.p1).bg; const c2=m.p2==='bye'?'#555':tPCol(m.p2).bg;
+          html+=`<div style="background:rgba(22,22,34,0.9);border:1px solid ${m.winner?'rgba(0,232,122,0.4)':'var(--border)'};border-radius:8px;overflow:hidden;margin-bottom:4px;">
+            <div style="display:flex;align-items:center;gap:6px;padding:7px 8px;border-bottom:1px solid var(--border);${m.winner===m.p1?'background:rgba(0,232,122,0.1);':''}">
+              <div style="width:7px;height:7px;border-radius:50%;background:${c1};flex-shrink:0;"></div>
+              <div style="font-size:11px;font-weight:700;color:${m.winner===m.p1?'var(--accent)':'var(--text)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${esc(tPName(m.p1))}</div>
+              <div style="font-size:10px;color:var(--muted);flex-shrink:0;">${m.p1Legs||0}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:7px 8px;${m.winner===m.p2?'background:rgba(0,232,122,0.1);':''}">
+              <div style="width:7px;height:7px;border-radius:50%;background:${c2};flex-shrink:0;"></div>
+              <div style="font-size:11px;font-weight:700;color:${m.winner===m.p2?'var(--accent)':'var(--text)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${m.p2==='bye'?'—':esc(tPName(m.p2))}</div>
+              <div style="font-size:10px;color:var(--muted);flex-shrink:0;">${m.p2==='bye'?'':m.p2Legs||0}</div>
+            </div>
+          </div>`;
+        });
+        html+=`</div>`;
+      });
+      if(t.done&&t.champion){
+        html+=`<div style="flex:0 0 110px;">
+          <div style="font-size:10px;color:var(--gold);letter-spacing:1px;margin-bottom:6px;text-align:center;">VOITTAJA</div>
+          <div style="background:rgba(255,215,0,0.1);border:2px solid var(--gold);border-radius:8px;padding:12px 8px;text-align:center;">
+            <div style="font-size:26px;">🏆</div>
+            <div style="font-size:12px;font-weight:700;color:var(--gold);margin-top:4px;">${esc(tPName(t.champion))}</div>
+          </div>
+        </div>`;
+      }
+      html+=`</div></div>`;
+    }
+  }
+
+  div.innerHTML=`
     <div class="header">
       <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Turnaus 🏆 ${t.done?'✓':t.phase==='group'?'(Alkusarja)':'(Pudotuspelit)'}</div>
+      <div class="header-title" style="font-size:17px;">Turnaus ${t.done?'✓':t.phase==='group'?'(Alkusarja)':'(Pudotuspelit)'}</div>
     </div>
+    ${tabs}
     <div style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
     ${t.done?
       `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;nav('home');">Uusi turnaus</button></div>`:
