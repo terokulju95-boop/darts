@@ -1256,15 +1256,24 @@ function processX01(dart) {
     p.legsWon = (p.legsWon||0)+1;
     // Check if player has won enough legs
     if(p.legsWon >= (g.legsToWin||1)) {
-      // 3+ player game: ask if others want to play on for 2nd/3rd
+      // 3+ player game - first winner triggers continue prompt
       if(g.players.length >= 3 && !g.finalists) {
-        g.finalists = g.finalists || [];
-        const activePlayers = g.players.filter(pl => !pl.finished);
-        activePlayers.forEach(pl => { if(pl.id === p.id) pl.finished = true; });
-        if(!g.finalists) g.finalists = [];
+        g.finalists = [];
+        p.finished = true;
         g.finalists.push(p.id);
-        // Show prompt
+        g.realWinner = p; // Store real winner permanently
         showContinuePrompt(p);
+        return;
+      }
+      // Continuation mode: this is 2nd place finisher
+      if(g.finalists && g.realWinner) {
+        p.finished = true;
+        g.finalists.push(p.id);
+        // End game with original winner
+        g.gameOver = true;
+        g.winner = g.realWinner; // Always the original winner!
+        g.endTime = Date.now();
+        endGame();
         return;
       }
       g.gameOver = true; g.winner = p; g.endTime = Date.now();
@@ -1343,9 +1352,8 @@ function endGameNow() {
   const overlay = document.getElementById('continue-overlay');
   if(overlay) overlay.remove();
   const g = S.game;
-  const winner = g.players.find(p => p.finished);
   g.gameOver = true;
-  g.winner = winner || g.players[0];
+  g.winner = g.realWinner || g.players.find(p => p.finished) || g.players[0];
   g.endTime = Date.now();
   endGame();
 }
@@ -1515,10 +1523,21 @@ function sumConfirm() {
     p.legsWon = (p.legsWon||0)+1;
     if(p.legsWon >= (g.legsToWin||1)) {
       if(g.players.length >= 3 && !g.finalists) {
-        g.finalists = g.finalists || [];
+        g.finalists = [];
         p.finished = true;
         g.finalists.push(p.id);
+        g.realWinner = p;
         showContinuePrompt(p);
+        return;
+      }
+      // Continuation mode: 2nd place
+      if(g.finalists && g.realWinner) {
+        p.finished = true;
+        g.finalists.push(p.id);
+        g.gameOver = true;
+        g.winner = g.realWinner;
+        g.endTime = Date.now();
+        endGame();
         return;
       }
       g.gameOver = true; g.winner = p; g.endTime = Date.now();
@@ -1562,10 +1581,8 @@ function advanceX01() {
   // Check if only one active player remains → they are last place
   const activePlayers = g.players.filter(p => !p.finished);
   if(activePlayers.length === 1 && g.finalists) {
-    const lastPlace = activePlayers[0];
     g.gameOver = true;
-    const winner = g.players.find(p => p.finished);
-    g.winner = winner || lastPlace;
+    g.winner = g.realWinner || g.players.find(p => p.finished) || g.players[0];
     g.endTime = Date.now();
     endGame();
     return;
