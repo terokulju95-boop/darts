@@ -993,15 +993,15 @@ function renderSetupPlayers() {
     const selIdx = sel.indexOf(p.id);
     const col = playerColor(selIdx>=0?selIdx:idx);
     const borderCol = on ? col.bg : 'var(--border)';
+    const avatarCol = playerColor(idx); // always use list position for avatar
     return `
       <div class="player-select-card ${on?'selected':''}" onclick="toggleSel('${p.id}')"
-        style="border-color:${borderCol};${on?'background:'+col.bg+'18;':''}">
-        <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
+        style="${on?'border-color:'+col.bg+';background:'+col.bg+'18;':''}">
+        <div class="player-avatar" style="background:${avatarCol.bg};color:${avatarCol.text};">${p.name[0].toUpperCase()}</div>
         <div class="player-name">${esc(p.name)}</div>
         <div style="display:flex;align-items:center;gap:8px;">
           ${on?`<span style="font-size:12px;color:${col.bg};font-weight:700;">#${selIdx+1}</span>`:''}
-          <span class="player-order" style="font-size:11px;color:var(--muted);margin-right:4px;">${on?'#'+(sel.indexOf(p.id)+1):''}</span>
-        <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
+          <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
         </div>
       </div>`;
   }).join('');
