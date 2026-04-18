@@ -1035,37 +1035,21 @@ function renderSetupPlayers() {
 }
 
 function toggleSel(id) {
+  // Save scroll position
+  const screen = document.querySelector('.screen');
+  const scrollY = screen ? screen.scrollTop : 0;
   const sel = S.setup.selected;
   const i = sel.indexOf(id);
   if (i===-1) sel.push(id); else sel.splice(i,1);
-  // Update in-place without scroll jump
-  const card = document.querySelector(`[data-player-id="${id}"]`);
-  if(card) {
-    const on = sel.includes(id);
-    const order = on ? sel.indexOf(id)+1 : null;
-    const col = playerColor(S.players.findIndex(p=>p.id===id));
-    card.className = 'player-select-card' + (on?' selected':'');
-    card.style.borderColor = on ? col.bg : 'var(--border)';
-    card.style.background = on ? col.bg+'18' : '';
-    const chk = card.querySelector('.checkmark');
-    if(chk) { chk.style.background=on?col.bg:''; chk.style.borderColor=on?col.bg:''; chk.style.color=on?col.text:''; chk.textContent=on?'✓':''; }
-    const orderEl = card.querySelector('.player-order');
-    if(orderEl) orderEl.textContent = on ? '#'+order : '';
-  }
-  // Update header count and start button
-  const hdr = document.querySelector('.header-title');
-  if(hdr) hdr.textContent = 'PELAAJAT (' + sel.length + ' valittu)';
-  const startBtn = document.querySelector('.start-game-btn');
-  if(startBtn) {
-    const ok = sel.length >= 2;
-    startBtn.className = 'btn large' + (ok?'':' disabled');
-    startBtn.onclick = ok ? startGame : null;
-  }
-  // Re-number all selected players
-  document.querySelectorAll('.player-select-card.selected .player-order').forEach((el, idx) => {
-    el.textContent = '#' + (idx+1);
+  // Re-render but restore scroll
+  nav('setup-players');
+  requestAnimationFrame(() => {
+    const s = document.querySelector('.screen');
+    if(s) s.scrollTop = scrollY;
   });
 }
+
+
 
 // ==================== START GAME ====================
 function startGame() {
