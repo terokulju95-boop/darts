@@ -1269,6 +1269,7 @@ function processX01(dart) {
     if(p.legsWon >= (g.legsToWin||1)) {
       // 3+ player game - first winner triggers continue prompt
       if(g.players.length >= 3 && !g.finalists) {
+        g.currentDarts = []; g.modifier = null; // Clear darts before prompt
         g.finalists = [];
         p.finished = true;
         g.finalists.push(p.id);
@@ -1278,6 +1279,7 @@ function processX01(dart) {
       }
       // Continuation mode: another player finished
       if(g.finalists && g.realWinner) {
+        g.currentDarts = []; g.modifier = null; // Clear darts before next player
         p.finished = true;
         g.finalists.push(p.id);
         const stillActive = g.players.filter(pl => !pl.finished);
@@ -1359,9 +1361,7 @@ function continueGameForRest() {
   const overlay = document.getElementById('continue-overlay');
   if(overlay) overlay.remove();
   const g = S.game;
-  // Mark winner as finished, reset their score display but keep them visible
-  const winner = g.players.find(p => p.finished);
-  if(winner) winner.score = 0; // Show as done
+  g.currentDarts = []; g.modifier = null; // Always clear darts when continuing
   // Advance to next non-finished player
   advanceX01();
 }
@@ -1541,6 +1541,7 @@ function sumConfirm() {
     p.legsWon = (p.legsWon||0)+1;
     if(p.legsWon >= (g.legsToWin||1)) {
       if(g.players.length >= 3 && !g.finalists) {
+        g.sumInput = ''; g.currentDarts = []; g.modifier = null;
         g.finalists = [];
         p.finished = true;
         g.finalists.push(p.id);
