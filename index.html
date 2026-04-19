@@ -2052,10 +2052,23 @@ function endGame() {
     });
   }
 
+  // Build placements array if continuation game was played
+  let placements = null;
+  if(g.finalists && g.finalists.length > 0) {
+    placements = g.finalists.map((id,i) => ({id, name: g.players.find(p=>p.id===id)?.name||'?', place: i+1}));
+    // Last player(s) not in finalists = last place
+    g.players.forEach(p => {
+      if(!g.finalists.includes(p.id)) {
+        placements.push({id:p.id, name:p.name, place: placements.length+1});
+      }
+    });
+  }
+
   fbSaveGame({
     type:g.type,
     winner:g.players.length>=2&&g.winner?{id:g.winner.id,name:g.winner.name}:null,
     players:g.players.map(p=>({id:p.id,name:p.name})),
+    placements,
     checkoutMode:g.checkoutMode||null,
     cricketMode:g.cricketMode||null,
     startScore:g.startScore||null,
@@ -2111,7 +2124,27 @@ function renderGameOver() {
     +'<div class="gstat-row"><span>Vuoroja</span><span class="gstat-val">'+s.turns+'</span></div>'
     +'</div>').join(''):'';
   const div=el('div','screen');
-  const playerRows=g?.players?g.players.map(p=>'<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:14px;"><span style="color:'+(p.id===w?.id?'var(--gold)':'var(--text)')+';">'+(p.id===w?.id?'&#127942; ':'')+esc(p.name)+'</span>'+(isX01?'<span style="color:var(--muted);">'+p.score+' jäljellä</span>':'')+'</div>').join(''):'';
+  // Build placements for display
+  const placementMap = {};
+  if(g?.finalists && g.finalists.length > 0) {
+    g.finalists.forEach((id,i) => { placementMap[id] = i+1; });
+    let lastPlace = g.finalists.length + 1;
+    g?.players?.forEach(p => { if(!placementMap[p.id]) placementMap[p.id] = lastPlace++; });
+  }
+  const medals = ['🥇','🥈','🥉'];
+  const playerRows=g?.players?g.players.map(p=>{
+    const place = placementMap[p.id];
+    const isWinner = p.id===w?.id;
+    const badge = place ? (medals[place-1]||('#'+place)) : (isWinner?'🏆':'');
+    const col = isWinner?'var(--gold)':place===2?'var(--accent)':place===3?'var(--blue)':'var(--text)';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">'
+      +'<div style="display:flex;align-items:center;gap:10px;">'
+      +(badge?'<span style="font-size:20px;">'+badge+'</span>':'<span style="width:24px;"></span>')
+      +'<span style="font-size:15px;font-weight:700;color:'+col+';">'+esc(p.name)+'</span>'
+      +'</div>'
+      +(isX01?'<span style="font-size:13px;color:var(--muted);">'+p.score+' jäljellä</span>':'')
+      +'</div>';
+  }).join(''):'';
   div.innerHTML='<div class="gameover-screen" style="overflow-y:auto;justify-content:flex-start;padding-top:28px;">'
     +'<div style="font-size:80px;margin-bottom:10px;">&#127942;</div>'
     +(isSolo
@@ -2165,7 +2198,7 @@ function renderHistory() {
           </div>
         </div>
         ${g.winner?`<div class="h-winner">🏆 ${esc(g.winner.name)}</div>`:((g.players||[]).length<2?'<div style="font-size:13px;color:var(--accent);">🎯 Solo-peli</div>':'')}
-        <div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>
+        ${g.placements && g.placements.length>1 ? `<div style="font-size:12px;color:var(--muted);margin-top:3px;">${g.placements.map(p=>{const m=['🥇','🥈','🥉'];return (m[p.place-1]||('#'+p.place))+' '+esc(p.name);}).join(' · ')}</div>` : `<div class="h-players">${(g.players||[]).map(p=>esc(p.name)).join(', ')}</div>`}
         ${g.duration?`<div style="font-size:11px;color:var(--muted);margin-top:3px;">⏱ ${fmtDuration(g.duration)}</div>`:''}
         <div style="font-size:11px;color:var(--muted);margin-top:4px;">Klikkaa nähdäksesi tiedot ›</div>
       </div>`).join('')+`</div>`;
