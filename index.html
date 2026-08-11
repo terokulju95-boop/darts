@@ -153,6 +153,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 .cur-score.bust { color:var(--red); }
 .cur-score.win { color:var(--accent); }
 .score-sub { font-size:12px; color:var(--muted); margin-top:1px; min-height:16px; }
+.score-avg { font-size:13px; color:var(--muted); margin-top:2px; min-height:16px; }
 
 .darts-thrown { display:flex; justify-content:center; gap:6px; padding:3px 16px; flex-shrink:0; }
 .dart-chip { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:5px 10px; font-family:var(--fd); font-size:18px; color:var(--text); min-width:52px; text-align:center; }
@@ -1147,6 +1148,9 @@ function renderX01() {
     : g.editMode ? `<span style="color:var(--gold)">✏️ MUOKKAUSTILA – tallenna Seuraava</span>`
     : 'pistettä jäljellä';
 
+  const curTurnScores = (p.history||[]).filter(h=>!h.bust && h.scored>0).map(h=>h.scored);
+  const curAvg = curTurnScores.length ? Math.round(curTurnScores.reduce((a,b)=>a+b,0)/curTurnScores.length*10)/10 : null;
+
   const dartsLeft = 3 - g.currentDarts.length;
   const co = getCheckout(p.score, g.checkoutMode, dartsLeft);
   const coHtml = co
@@ -1169,6 +1173,7 @@ function renderX01() {
       <div class="cur-player-name" style="color:${playerColor(g.currentPlayerIndex).bg};">${esc(p.name)}</div>
       <div class="cur-score" id="cscore">${p.score}</div>
       <div class="score-sub">${subLabel}</div>
+      <div class="score-avg">${curAvg!==null?`Keskiarvo <b style="color:var(--accent);">${curAvg}</b> / heittovuoro`:'Ei vielä heittovuoroja'}</div>
     </div>
     ${coHtml}
     ${g.editMode?`<div style="background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:8px;margin:0 8px 2px;padding:4px 10px;text-align:center;font-size:11px;color:var(--gold);flex-shrink:0;">
@@ -1263,7 +1268,7 @@ function processX01(dart) {
     }
     g.currentDarts.push(dart);
     p.score = 0;
-    p.history.push({ darts:[...g.currentDarts] });
+    p.history.push({ darts:[...g.currentDarts], scored:g.currentDarts.reduce((s,d)=>s+dartValue(d),0) });
     p.legsWon = (p.legsWon||0)+1;
     // Check if player has won enough legs
     if(p.legsWon >= (g.legsToWin||1)) {
@@ -2261,6 +2266,15 @@ function renderHistoryDetail() {
       ${g.winner?`<div style="font-size:16px;color:var(--gold);margin-bottom:4px;">🏆 ${esc(g.winner.name)}</div>`:''}
       <div style="font-size:13px;color:var(--muted);">${fmtDate(g.createdAt)} ${g.duration?'· '+fmtDuration(g.duration):''}</div>
       <div style="font-size:13px;color:var(--muted);margin-top:2px;">${(g.players||[]).map((p,i)=>'<span style="color:'+playerColor(i).bg+'">'+esc(p.name)+'</span>').join(' vs ')}</div>
+      ${isX01 && g.playerStats ? `<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;">
+        ${(g.players||[]).map((p,i)=>{
+          const ps = g.playerStats[p.id];
+          return `<div style="font-size:12px;color:var(--muted);">
+            <span style="color:${playerColor(i).bg};font-weight:600;">${esc(p.name)}</span>
+            keskiarvo <b style="color:var(--text);font-family:var(--fd);font-size:14px;">${ps?ps.avg:0}</b>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
     </div>
     ${detailHtml}
   `;
