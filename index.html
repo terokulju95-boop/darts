@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.3';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.5';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -621,7 +621,9 @@ async function deleteGame(id) {
   if (!db) return;
   try {
     await db.collection('darts_games').doc(id).delete();
-    S.history = S.history.filter(g => g.id !== id); invalidateHistoryCache();
+    S.history = S.history.filter(g => g.id !== id);
+    S.historyCachedAt = null;                 // hae palvelimelta seuraavalla k\u00e4ynnill\u00e4
+    S.statsLoaded = false; S.statsCachedAt = null;   // tilastot johdetaan peleist\u00e4
     render();
     showToast('Peli poistettu', 'success');
   } catch(e) { showToast('Poisto epäonnistui','error'); }
@@ -635,7 +637,9 @@ async function deleteAllGames() {
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
     await batch.commit();
-    S.history = []; invalidateHistoryCache();
+    S.history = [];
+    S.historyCachedAt = null;
+    S.statsLoaded = false; S.statsCachedAt = null;
     render();
     showToast('Kaikki pelit poistettu', 'success');
   } catch(e) { showToast('Poisto epäonnistui','error'); }
@@ -683,7 +687,12 @@ function loadPlayersFromCache() {
 async function fbAddPlayer(p) {
   if (!db) return p;
   try {
-    const ref = await db.collection('darts_players').add({ name: p.name, wins: 0, games: 0, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    const ref = await db.collection('darts_players').add({
+      name: p.name, wins: 0, games: 0,
+      totalPoints: 0, totalTurns: 0, allTimeAvg: 0,
+      statsSchema: STATS_SCHEMA,   // uusi pelaaja on jo oikeassa muodossa
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
     return { ...p, id: ref.id };
   } catch(e) { console.error(e); return p; }
 }
@@ -968,6 +977,17 @@ function nav(screen, extra={}) {
 function render() {
   setAppHeight && setAppHeight();
   const app = document.getElementById('app');
+
+  // Re-rendering the same screen must not throw the user back to the top.
+  // Both the .screen element and the inner .scrollbox container are restored,
+  // because different screens scroll in different places.
+  const sameScreen = (S.screen === render._lastScreen);
+  let keepScreen = 0, keepBox = 0;
+  if (sameScreen) {
+    const sc = app.querySelector('.screen');   if (sc)  keepScreen = sc.scrollTop;
+    const bx = app.querySelector('.scrollbox'); if (bx) keepBox    = bx.scrollTop;
+  }
+
   const fns = {
     home: renderHome, players: renderPlayers,
     'setup-type': renderSetupType, 'setup-config': renderSetupConfig,
@@ -980,6 +1000,18 @@ function render() {
   };
   const fn = fns[S.screen];
   if (fn) { app.innerHTML = ''; app.appendChild(fn()); }
+  render._lastScreen = S.screen;
+
+  if (sameScreen && (keepScreen || keepBox)) {
+    const restore = () => {
+      const sc = app.querySelector('.screen');
+      if (sc && keepScreen) sc.scrollTop = keepScreen;
+      const bx = app.querySelector('.scrollbox');
+      if (bx && keepBox) bx.scrollTop = keepBox;
+    };
+    restore();                              // heti, ennen maalausta
+    requestAnimationFrame(restore);         // ja uudestaan kun asettelu on valmis
+  }
 }
 
 // ==================== HOME ====================
@@ -1112,7 +1144,7 @@ async function addPlayer() {
   if (!name) return;
   if (S.players.find(p => p.name.toLowerCase() === name.toLowerCase())) { showToast('Pelaaja on jo listassa','error'); return; }
   if (!db) { showToast('Ei yhteytt\u00e4 \u2013 pelaajaa ei voi lis\u00e4t\u00e4 nyt', 'error'); return; }
-  let p = { id:genId(), name, wins:0, games:0 };
+  let p = { id:genId(), name, wins:0, games:0, totalPoints:0, totalTurns:0, allTimeAvg:0, statsSchema:STATS_SCHEMA };
   p = await fbAddPlayer(p);
   S.players.push(p);
   try { localStorage.setItem('darts_players_cache', JSON.stringify(S.players)); } catch(e) {}
@@ -1312,18 +1344,10 @@ function renderSetupPlayers() {
 }
 
 function toggleSel(id) {
-  // Save scroll position
-  const screen = document.querySelector('.screen');
-  const scrollY = screen ? screen.scrollTop : 0;
   const sel = S.setup.selected;
   const i = sel.indexOf(id);
   if (i===-1) sel.push(id); else sel.splice(i,1);
-  // Re-render but restore scroll
-  nav('setup-players');
-  requestAnimationFrame(() => {
-    const s = document.querySelector('.screen');
-    if(s) s.scrollTop = scrollY;
-  });
+  render();   // render() sailyttaa vierityksen, koska ruutu ei vaihdu
 }
 
 
@@ -1968,7 +1992,7 @@ function renderCricket() {
         ${playerHeaderCells}${ptsHeaders}
       </div>
     </div>
-    <div style="flex:1;overflow-y:auto;padding:7px;">${rows}</div>
+    <div class="scrollbox" style="flex:1;overflow-y:auto;padding:7px;">${rows}</div>
     ${pointsBar}
     <div style="background:var(--surface);border-top:1px solid var(--border);padding:8px 10px;flex-shrink:0;">
       <div style="font-size:12px;color:var(--accent);text-align:center;margin-bottom:5px;font-weight:600;">▶ ${esc(p.name)}</div>
@@ -2165,7 +2189,7 @@ function renderShanghai() {
       <div style="font-family:var(--fd);font-size:80px;color:var(--accent);line-height:1;">${tgt}</div>
       <div style="font-size:11px;color:var(--muted);">🎯 Shanghai (S+D+T samalla vuorolla) = välitön voitto!</div>
     </div>
-    <div style="flex:1;overflow-y:auto;padding:0 10px;">${playerRows}</div>
+    <div class="scrollbox" style="flex:1;overflow-y:auto;padding:0 10px;">${playerRows}</div>
     <div style="padding:8px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
       <div class="darts-thrown" style="padding:3px 0 7px;">${chips}</div>
       <div class="modifier-row" style="margin-bottom:7px;">
@@ -2247,7 +2271,7 @@ function renderHalveIt() {
       <div style="font-size:11px;color:var(--red);margin-top:3px;">Huti → pisteet puolittuvat!</div>
       ${remRounds>0?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">Seuraavat: ${g.targets.slice(g.roundIndex+1).join(' · ')}</div>`:''}
     </div>
-    <div style="flex:1;overflow-y:auto;padding:0 10px;">${pRows}</div>
+    <div class="scrollbox" style="flex:1;overflow-y:auto;padding:0 10px;">${pRows}</div>
     <div style="padding:8px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;">
       <div class="darts-thrown" style="padding:3px 0 7px;">${chips}</div>
       <div class="modifier-row" style="margin-bottom:7px;">
@@ -2760,7 +2784,7 @@ function renderTournamentSetup() {
       <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
       <div class="header-title">Turnaus</div>
     </div>
-    <div style="overflow-y:auto;flex:1;padding-bottom:20px;">
+    <div class="scrollbox" style="overflow-y:auto;flex:1;padding-bottom:20px;">
       <div class="config-section">
         <div style="font-size:12px;color:var(--muted);">Alkusarja (kaikki pelaa kaikkia) → pudotuspelit seedauksen mukaan. Max 10 pelaajaa.</div>
       </div>
@@ -3324,7 +3348,7 @@ function renderQuickTournamentBracket(div) {
       <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
       <div class="header-title">Turnaus ⚡ ${t.done?'✓':''}</div>
     </div>
-    <div style="overflow-y:auto;flex:1;">${html}</div>
+    <div class="scrollbox" style="overflow-y:auto;flex:1;">${html}</div>
     ${t.done?
       `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
       `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
@@ -3496,10 +3520,9 @@ function renderLongTournamentBracket(div) {
     if(!hasKnockout){
       html+='<div class="empty-state"><span class="ei">⏳</span><p>Pudotuspelit alkavat alkusarjan jälkeen.</p></div>';
     } else {
-      const roundNames=['1. Kierros','Puolivälierät','Välierät','Finaali'];
       (t.knockoutMatches||[]).forEach((round,ri)=>{
         const isActive=ri===t.knockoutRound;
-        const rName=roundNames[Math.min(ri,roundNames.length-1)];
+        const rName=tRoundName(round,ri);
         html+=`<div style="font-family:var(--fd);font-size:15px;color:${isActive?'var(--accent)':'var(--muted)'};letter-spacing:2px;padding:8px 14px 4px;">${rName.toUpperCase()}</div>`;
         round.forEach((m,mi)=>{
           const playable=isActive&&!m.winner&&m.p2!=='bye'&&!t.losersMatch;
@@ -3530,10 +3553,9 @@ function renderLongTournamentBracket(div) {
       html+=`<div style="font-size:11px;color:var(--muted);padding:4px 14px 6px;">Vaaka: kierros vasemmalta oikealle</div>`;
       html+=`<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:4px 14px 20px;">`;
       html+=`<div style="display:flex;gap:10px;min-width:${(rounds.length+(t.done?1:0))*130}px;align-items:flex-start;">`;
-      const roundNames2=['1. kierros','Puolivälierät','Välierät','Finaali'];
       rounds.forEach((round,ri)=>{
         const isActive=ri===t.knockoutRound;
-        const rName=roundNames2[Math.min(ri,roundNames2.length-1)];
+        const rName=tRoundName(round,ri);
         const spacer=ri===0?0:(Math.pow(2,ri)-1)*68;
         html+=`<div style="flex:0 0 120px;">
           <div style="font-size:10px;color:${isActive?'var(--accent)':'var(--muted)'};letter-spacing:1px;margin-bottom:6px;text-align:center;">${rName.toUpperCase()}</div>`;
@@ -3574,11 +3596,23 @@ function renderLongTournamentBracket(div) {
       <div class="header-title" style="font-size:17px;">Turnaus ${t.done?'✓':t.phase==='group'?'(Alkusarja)':'(Pudotuspelit)'}</div>
     </div>
     ${tabs}
-    <div style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
+    <div class="scrollbox" style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
     ${t.done?
       `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
       `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
     }`;
+}
+
+// Kierroksen nimi otteluiden määrästä, ei kierrosnumerosta.
+// 1 ottelu = finaali, 2 = välierät, 3-4 = puolivälierät, sitä ennen numerointi.
+function tRoundName(round, ri) {
+  const n = (round || []).length;
+  if (n <= 0) return (ri + 1) + '. kierros';
+  if (n === 1) return 'Finaali';
+  if (n === 2) return 'V\u00e4lier\u00e4t';
+  if (n <= 4) return 'Puoliv\u00e4lier\u00e4t';
+  if (n <= 8) return '8. finaali';
+  return (ri + 1) + '. kierros';
 }
 
 function tMatchCard(p1id, p2id, winner, playable, onclick, extra='') {
@@ -3708,7 +3742,7 @@ function renderPlayerProfile() {
       <button class="back-btn" onclick="nav('players')">‹ Takaisin</button>
       <div class="header-title">Profiili</div>
     </div>
-    <div style="overflow-y:auto;flex:1;padding-bottom:24px;">
+    <div class="scrollbox" style="overflow-y:auto;flex:1;padding-bottom:24px;">
       <!-- HERO -->
       <div style="background:linear-gradient(135deg,${col.bg}22,${col.bg}08);border-bottom:1px solid ${col.bg}33;padding:20px 16px;display:flex;align-items:center;gap:16px;">
         <div style="width:64px;height:64px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:32px;font-weight:700;box-shadow:0 0 24px ${col.bg}55;">
@@ -3962,7 +3996,7 @@ function renderRecords() {
         <div class="header-title">Ennätykset</div>
       </div>
       ${tabBtns}
-      <div style="padding:0 14px 20px;overflow-y:auto;flex:1;">
+      <div class="scrollbox" style="padding:0 14px 20px;overflow-y:auto;flex:1;">
         <div style="background:rgba(0,232,122,0.08);border:1px solid rgba(0,232,122,0.2);border-radius:12px;padding:12px 16px;margin-bottom:14px;">
           <div style="font-family:var(--fd);font-size:16px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;">KAIKKI PELAAJAT YHTEENSÄ</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -4026,7 +4060,7 @@ function renderRecords() {
       </div>
       ${tabBtns}
       ${playerPicker}
-      <div style="padding:0 14px 20px;overflow-y:auto;flex:1;">${content}</div>`;
+      <div class="scrollbox" style="padding:0 14px 20px;overflow-y:auto;flex:1;">${content}</div>`;
   }
 
   return div;
