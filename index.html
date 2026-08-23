@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.7';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.8';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -579,6 +579,24 @@ async function fbSaveGame(data, profiles) {
   return true;
 }
 
+// Firestore refuses an array whose elements are arrays, and both
+// knockoutMatches and bracket are arrays of rounds. Wrap each round in an
+// object: {matches:[...]}. An object may contain an array, so this is legal.
+// Returns null for an empty or missing bracket.
+function tWrapRounds(rounds) {
+  if (!Array.isArray(rounds) || !rounds.length) return null;
+  return rounds.map(r => ({ matches: Array.isArray(r) ? r : [] }));
+}
+
+// Reads either shape: the wrapped one written from v5.8 on, and a raw array of
+// arrays in case a document ever appears in the old form.
+function tUnwrapRounds(rounds) {
+  if (!Array.isArray(rounds) || !rounds.length) return [];
+  return rounds.map(r => Array.isArray(r) ? r : ((r && r.matches) || []));
+}
+
+const TOURNAMENT_SCHEMA = 1;
+
 async function saveTournamentToFirebase(t) {
   if (!t) return;
   // Credit the champion before anything that can fail.
@@ -592,13 +610,14 @@ async function saveTournamentToFirebase(t) {
   try {
     if (!db) return;
     await db.collection('darts_tournaments').add({
+      schemaVersion: TOURNAMENT_SCHEMA,
       format: t.format || null,
       champion: t.champion || null,
       players: t.players || [],
       gameType: t.gameType || null,
       groupStandings: t.groupStandings || null,
-      knockoutMatches: t.knockoutMatches || null,
-      bracket: t.bracket || null,
+      knockoutMatches: tWrapRounds(t.knockoutMatches),
+      bracket: tWrapRounds(t.bracket),
       finishedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
     invalidateTournamentCache();   // muuten uusi turnaus ei n\u00e4y historiassa 5 min
@@ -3904,8 +3923,8 @@ function renderTournamentHistoryDetail() {
     }
   }
 
-  const rounds = (t.knockoutMatches && t.knockoutMatches.length) ? t.knockoutMatches
-               : (t.bracket && t.bracket.length) ? t.bracket : [];
+  const knock = tUnwrapRounds(t.knockoutMatches);
+  const rounds = knock.length ? knock : tUnwrapRounds(t.bracket);
   if (rounds.length) {
     html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:8px 14px 4px;">PUDOTUSPELIT</div>`;
     rounds.forEach((round, ri) => {
