@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.6';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.7';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -601,10 +601,61 @@ async function saveTournamentToFirebase(t) {
       bracket: t.bracket || null,
       finishedAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
+    invalidateTournamentCache();   // muuten uusi turnaus ei n\u00e4y historiassa 5 min
     showToast('Turnaus tallennettu \u2713', 'success');
   } catch(e) {
     console.error('saveTournament:', e);
     showToast('Turnauksen tallennus ep\u00e4onnistui', 'error');
+  }
+}
+
+async function fbLoadTournaments() {
+  S.tournamentsError = null;
+  if (!db) { S.tournamentsError = 'Ei yhteytt\u00e4 tietokantaan'; return []; }
+  try {
+    const snap = await db.collection('darts_tournaments')
+      .orderBy('finishedAt', 'desc').limit(100).get();
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // finishedAt is a serverTimestamp, so a document written while offline
+    // reads back with the field still empty. Sort locally as a safety net and
+    // put those pending writes first — they are the newest thing this device did.
+    rows.sort((a, b) => tsMillis(b.finishedAt) - tsMillis(a.finishedAt));
+    return rows;
+  } catch(e) {
+    console.error('fbLoadTournaments:', e);
+    S.tournamentsError = (e && (e.code || e.message)) || 'Tuntematon virhe';
+    return [];
+  }
+}
+
+// Number of milliseconds, or Infinity when the timestamp has not landed yet.
+function tsMillis(ts) {
+  if (!ts) return Infinity;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const ms = d.getTime();
+  return isNaN(ms) ? Infinity : ms;
+}
+
+function invalidateTournamentCache() {
+  S.tournamentsLoaded = false; S.tournamentsCachedAt = null;
+}
+
+async function deleteTournament(id) {
+  if (!confirm('Poistetaanko turnaus? T\u00e4t\u00e4 ei voi peruuttaa.')) return;
+  if (!db) { showToast('Ei yhteytt\u00e4 \u2013 poisto ep\u00e4onnistui', 'error'); return; }
+  try {
+    await db.collection('darts_tournaments').doc(id).delete();
+    S.tournaments = S.tournaments.filter(t => t.id !== id);
+    if (S.detailTournament && S.detailTournament.id === id) {
+      S.detailTournament = null;
+      if (S.screen === 'tournament-history-detail') S.screen = 'tournament-history';
+    }
+    S.tournamentsCachedAt = null;            // hae palvelimelta seuraavalla k\u00e4ynnill\u00e4
+    render();
+    showToast('Turnaus poistettu', 'success');
+  } catch(e) {
+    console.error('deleteTournament:', e);
+    showToast('Poisto ep\u00e4onnistui', 'error');
   }
 }
 
@@ -664,6 +715,14 @@ let S = {
   statsLoaded: false,
   tournament: null,
   detailGame: null,
+  tournaments: [],
+  tournamentsLoaded: false,
+  tournamentsCachedAt: null,
+  tournamentsError: null,
+  // Kept apart from S.tournament on purpose: nav() persists S.tournament to
+  // localStorage, so putting a historical tournament there would destroy a
+  // tournament that is still in progress.
+  detailTournament: null,
 };
 
 // Players stored in Firebase (not localStorage) so they persist across browser data clears
@@ -1001,6 +1060,8 @@ function render() {
     game: renderGame, gameover: renderGameOver,
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
     'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
+    'tournament-history': renderTournamentHistory,
+    'tournament-history-detail': renderTournamentHistoryDetail,
     records: renderRecords, leaderboard: renderLeaderboard,
     'player-profile': renderPlayerProfile,
   };
@@ -1078,6 +1139,9 @@ function renderHome() {
       <button class="menu-btn" onclick="nav('tournament-setup')" style="border-color:rgba(255,215,0,0.3);">
         <span class="icon">&#127942;</span><span class="label">Turnaus</span><span class="arrow" style="color:var(--gold);">›</span>
       </button>`}
+      <button class="menu-btn" onclick="goTournamentHistory()" style="border-color:rgba(255,215,0,0.2);">
+        <span class="icon">&#128220;</span><span class="label">Turnaushistoria</span><span class="arrow" style="color:var(--gold);">›</span>
+      </button>
       <button class="menu-btn" onclick="goLeaderboard()" style="border-color:rgba(68,136,255,0.3);">
         <span class="icon">&#127942;</span><span class="label">Leaderboard</span><span class="arrow" style="color:var(--blue);">›</span>
       </button>
@@ -3665,6 +3729,209 @@ function startTournamentMatch(matchIdx) {
 }
 
 function renderTournamentGame() { return renderGame(); }
+
+// ==================== TOURNAMENT HISTORY ====================
+// Read-only browsing of finished tournaments. Every helper here takes the
+// historical tournament as an argument; nothing reads S.tournament, because a
+// tournament may still be in progress while the user browses old ones.
+
+async function goTournamentHistory() {
+  nav('tournament-history');
+  const now = Date.now();
+  if (S.tournamentsLoaded && S.tournamentsCachedAt && (now - S.tournamentsCachedAt) < 300000) {
+    render(); return;
+  }
+  initFirebase();
+  S.tournaments = await fbLoadTournaments();
+  S.tournamentsLoaded = true;
+  S.tournamentsCachedAt = now;
+  render();
+}
+
+// Saved tournaments hold player ids only, so names come from the live player
+// list. A player deleted since then can no longer be named.
+function thName(t, id) {
+  if (!id) return '?';
+  if (id === 'bye') return '\u2014';
+  const p = S.players.find(x => x.id === id);
+  return p && p.name ? p.name : '?';
+}
+
+function thCol(t, id) {
+  const players = (t && t.players) || [];
+  const idx = players.indexOf(id);
+  return idx >= 0 ? playerColor(idx) : PLAYER_COLORS[0];
+}
+
+function thDate(ts) {
+  if (!ts) return 'Tallennetaan\u2026';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return isNaN(d.getTime()) ? 'Tallennetaan\u2026' : fmtDate(ts);
+}
+
+function thFormatName(t) {
+  return (t && t.format === 'quick') ? '\u26a1 Pikaturnaus' : '\u2694\ufe0f Sarja + pudotuspelit';
+}
+
+// groupStandings is stored unsorted, in the original player order. The live
+// screen breaks ties with head-to-head, but groupMatches is not saved, so that
+// step cannot be reproduced here — see thTieNote().
+function thStandings(t) {
+  const rows = ((t && t.groupStandings) || []).slice();
+  rows.sort((a, b) =>
+    (b.points || 0) - (a.points || 0) ||
+    (b.legWins || 0) - (a.legWins || 0) ||
+    (a.legLosses || 0) - (b.legLosses || 0) ||
+    String(thName(t, a.id)).localeCompare(String(thName(t, b.id)), 'fi'));
+  return rows;
+}
+
+function thTieNote(a, b) {
+  if (!a || !b) return false;
+  return (a.points || 0) === (b.points || 0) && (a.legWins || 0) === (b.legWins || 0);
+}
+
+// Same look as tMatchCard(), but never playable and never reads S.tournament.
+function thMatchCard(t, m) {
+  const p1n = esc(thName(t, m.p1));
+  const p2n = esc(thName(t, m.p2));
+  const col1 = m.p1 === 'bye' ? 'var(--muted)' : thCol(t, m.p1).bg;
+  const col2 = m.p2 === 'bye' ? 'var(--muted)' : thCol(t, m.p2).bg;
+  const legs = (m.p1Legs || m.p2Legs) ? `${m.p1Legs || 0}-${m.p2Legs || 0}` : '';
+  return `<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid ${m.winner?'rgba(0,232,122,0.3)':'var(--border)'};border-radius:12px;overflow:hidden;">
+    <div style="display:flex;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border);${m.winner===m.p1?'background:rgba(0,232,122,0.08);':''}">
+      <div style="width:10px;height:10px;border-radius:50%;background:${col1};margin-right:10px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:15px;font-weight:700;color:${m.winner===m.p1?'var(--accent)':'var(--text)'};">${p1n}</div>
+      ${m.winner===m.p1?'<div style="color:var(--accent);font-size:16px;">\u2713</div>':''}
+    </div>
+    <div style="display:flex;align-items:center;padding:11px 14px;${m.winner===m.p2?'background:rgba(0,232,122,0.08);':''}">
+      <div style="width:10px;height:10px;border-radius:50%;background:${col2};margin-right:10px;flex-shrink:0;"></div>
+      <div style="flex:1;font-size:15px;font-weight:700;color:${m.winner===m.p2?'var(--accent)':'var(--text)'};">${p2n}</div>
+      ${m.winner===m.p2?'<div style="color:var(--accent);font-size:16px;">\u2713</div>':''}
+    </div>
+    ${legs?`<div style="text-align:center;padding:6px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);">${legs}</div>`:''}
+  </div>`;
+}
+
+function renderTournamentHistory() {
+  const div = el('div','screen');
+  let content;
+  if (!S.tournamentsLoaded) {
+    content = `<div class="loader">\u23f3 Ladataan...</div>`;
+  } else if (S.tournamentsError) {
+    content = `<div class="empty-state"><span class="ei">\u26a0\ufe0f</span>
+      <p>Turnauksia ei saatu ladattua.<br>
+      <span style="font-size:12px;color:var(--muted);">Yhteysvirhe: ${esc(S.tournamentsError)}</span><br><br>
+      <span style="font-size:12px;">Turnauksesi ovat tallessa \u2013 vain lataus ep\u00e4onnistui.</span></p>
+      <button class="btn" onclick="invalidateTournamentCache();goTournamentHistory()" style="margin-top:12px;">Yrit\u00e4 uudelleen</button></div>`;
+  } else if (!S.tournaments.length) {
+    content = `<div class="empty-state"><span class="ei">\u{1F3C6}</span>
+      <p>Ei turnauksia viel\u00e4.<br>P\u00e4\u00e4ttyneet turnaukset tallentuvat t\u00e4nne.</p></div>`;
+  } else {
+    content = `<div class="history-list">` + S.tournaments.map(t => {
+      const col = thCol(t, t.champion);
+      return `<div class="history-card" onclick="showTournamentDetail('${esc(t.id)}')" style="cursor:pointer;">
+        <div class="history-card-header">
+          <div class="h-type">${thFormatName(t)}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="h-date">${esc(thDate(t.finishedAt))}</div>
+            <button onclick="event.stopPropagation();deleteTournament('${esc(t.id)}')" style="background:none;border:1px solid var(--red);color:var(--red);font-size:11px;padding:2px 7px;border-radius:5px;cursor:pointer;">\u2715</button>
+          </div>
+        </div>
+        ${t.champion?`<div class="h-winner" style="color:${col.bg};">\u{1F3C6} ${esc(thName(t, t.champion))}</div>`:`<div style="font-size:13px;color:var(--muted);">Ei voittajaa kirjattu</div>`}
+        <div class="h-players">${(t.players||[]).length} pelaajaa${t.gameType?' \u00b7 '+esc(GAMES.find(g=>g.id===t.gameType)?.name||t.gameType):''}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Klikkaa n\u00e4hd\u00e4ksesi tiedot \u203a</div>
+      </div>`;
+    }).join('') + `</div>`;
+  }
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">\u2039 Takaisin</button>
+      <div class="header-title">Turnaushistoria</div>
+    </div>
+    ${content}
+  `;
+  return div;
+}
+
+function showTournamentDetail(id) {
+  const t = S.tournaments.find(x => x.id === id);
+  if (!t) return;
+  S.detailTournament = t;          // never S.tournament, see the note on S
+  nav('tournament-history-detail');
+}
+
+function renderTournamentHistoryDetail() {
+  const t = S.detailTournament;
+  if (!t) return renderTournamentHistory();
+  const div = el('div','screen');
+
+  let html = '';
+
+  if (t.champion) {
+    html += `<div style="text-align:center;padding:16px 14px 8px;">
+      <div style="font-size:48px;">\u{1F3C6}</div>
+      <div style="font-family:var(--fd);font-size:34px;color:var(--gold);">${esc(thName(t, t.champion))}</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px;">TURNAUKSEN VOITTAJA</div>
+    </div>`;
+  }
+
+  const standings = thStandings(t);
+  if (standings.length) {
+    html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:8px 14px 4px;">ALKUSARJA</div>`;
+    html += `<div style="font-size:11px;color:var(--muted);padding:0 14px 6px;">P=Pelatut \u00b7 EV=Er\u00e4voitot \u00b7 PTS=Pisteet</div>`;
+    html += `<div style="margin:0 14px 10px;background:rgba(22,22,34,0.8);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:26px 1fr 34px 34px 38px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);letter-spacing:1px;">
+        <div>#</div><div>PELAAJA</div><div style="text-align:center;">P</div><div style="text-align:center;">EV</div><div style="text-align:center;">PTS</div>
+      </div>
+      ${standings.map((s,i)=>{
+        const col = thCol(t, s.id);
+        return `<div style="display:grid;grid-template-columns:26px 1fr 34px 34px 38px;padding:9px 12px;border-bottom:1px solid var(--border);">
+          <div style="font-family:var(--fd);font-size:15px;color:var(--muted);">${i+1}</div>
+          <div style="font-size:14px;font-weight:700;color:${col.bg};">${esc(thName(t, s.id))}</div>
+          <div style="text-align:center;font-size:13px;">${s.played||0}</div>
+          <div style="text-align:center;font-size:13px;">${s.legWins||0}</div>
+          <div style="text-align:center;font-family:var(--fd);font-size:16px;color:var(--accent);">${s.points||0}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+    // Head-to-head is not part of the saved document, so a tie broken that way
+    // cannot be reconstructed. Say so instead of implying a firm order.
+    if (standings.some((s,i)=>thTieNote(s, standings[i+1]))) {
+      html += `<div style="margin:0 14px 10px;padding:9px 12px;border-radius:10px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.3);font-size:12px;color:rgba(255,200,80,0.95);">
+        \u26a0\ufe0f Osa sijoituksista oli tasan pisteiss\u00e4 ja er\u00e4voitoissa. Keskin\u00e4isi\u00e4 otteluita ei tallenneta, joten t\u00e4m\u00e4 j\u00e4rjestys voi poiketa turnauksen aikana n\u00e4ytetyst\u00e4.
+      </div>`;
+    }
+  }
+
+  const rounds = (t.knockoutMatches && t.knockoutMatches.length) ? t.knockoutMatches
+               : (t.bracket && t.bracket.length) ? t.bracket : [];
+  if (rounds.length) {
+    html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:8px 14px 4px;">PUDOTUSPELIT</div>`;
+    rounds.forEach((round, ri) => {
+      html += `<div style="font-family:var(--fd);font-size:16px;color:var(--muted);letter-spacing:2px;padding:6px 14px 4px;">${tRoundName(round, ri).toUpperCase()}</div>`;
+      (round || []).forEach(m => { html += thMatchCard(t, m); });
+    });
+  }
+
+  if (!standings.length && !rounds.length) {
+    html += `<div class="empty-state"><span class="ei">\u{1F5C2}</span>
+      <p>Ei yksityiskohtaisia tietoja.<br>T\u00e4st\u00e4 turnauksesta tallennettiin vain lopputulos.</p></div>`;
+  }
+
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('tournament-history')">\u2039 Turnaukset</button>
+      <div class="header-title">${thFormatName(t)}</div>
+    </div>
+    <div style="padding:10px 14px 8px;background:var(--surface);border-bottom:1px solid var(--border);">
+      <div style="font-size:13px;color:var(--muted);">${esc(thDate(t.finishedAt))}${t.gameType?' \u00b7 '+esc(GAMES.find(g=>g.id===t.gameType)?.name||t.gameType):''}</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:3px;">${(t.players||[]).map(id=>'<span style="color:'+thCol(t,id).bg+'">'+esc(thName(t,id))+'</span>').join(' \u00b7 ')}</div>
+    </div>
+    <div class="scrollbox" style="overflow-y:auto;flex:1;">${html}</div>
+  `;
+  return div;
+}
 
 
 
