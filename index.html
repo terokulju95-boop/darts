@@ -11,7 +11,6 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Darts">
 <link rel="apple-touch-icon" href="icon-512.png">
-<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -316,8 +315,6 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.1';   // bump this together with CACHE in sw.js
-
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDswdEF9J0gsHJH6Zo_8BGZrf8DVG3FwYc",
@@ -334,20 +331,13 @@ let currentUser = null;
 
 function initFirebase() {
   try {
-    if (typeof firebase === 'undefined') throw new Error('Firebase SDK not loaded');
     if (!firebase.apps.length) {
       firebase.initializeApp(FIREBASE_CONFIG);
     }
     db = firebase.firestore();
     auth = firebase.auth();
-    // Queue writes locally and replay them when the connection returns.
-    if (db.enablePersistence) {
-      // Single-tab persistence: no deprecation warning, and if a second tab
-      // already holds the lock this simply resolves to failed-precondition.
-      db.enablePersistence().catch(e => console.warn('persistence:', e && e.code));
-    }
     return true;
-  } catch(e) { console.error('FB init:', e); db = null; auth = null; return false; }
+  } catch(e) { console.error('FB init:', e); return false; }
 }
 
 function initAuth(callback) {
@@ -379,7 +369,6 @@ async function logout() {
   if (!auth) return;
   localStorage.removeItem('darts_game');
   S.game = null;
-  S.offline = false;
   await auth.signOut();
   currentUser = null;
   renderLoginScreen();
@@ -423,146 +412,20 @@ async function doLogin() {
   // onAuthStateChanged handles success → render()
 }
 
-// ---- Durable save queue -------------------------------------------------
-// A finished game is written to localStorage BEFORE the network call, so a
-// failed or interrupted write can never destroy the result.
-function queuePendingGame(data, profiles) {
+async function fbSaveGame(data) {
+  if (!db) { showToast('Firebase ei konfiguroitu', 'error'); return; }
   try {
-    const q = JSON.parse(localStorage.getItem('darts_pending') || '[]');
-    const pid = genId();
-    // The per-player stat updates ride along with the game, so an offline
-    // session updates wins/averages once the connection returns.
-    q.push({ _pid: pid, _gameSaved: false, _profiles: (profiles || []).map(x => ({ ...x, _done: false })), ...data });
-    localStorage.setItem('darts_pending', JSON.stringify(q.slice(-50)));
-    return pid;
-  } catch(e) { console.error('queuePendingGame:', e); return null; }
-}
-
-function updatePendingGame(pid, mutate) {
-  if (!pid) return;
-  try {
-    const q = JSON.parse(localStorage.getItem('darts_pending') || '[]');
-    const item = q.find(x => x._pid === pid);
-    if (!item) return;
-    mutate(item);
-    localStorage.setItem('darts_pending', JSON.stringify(q));
-  } catch(e) {}
-}
-
-function dequeuePendingGame(pid) {
-  if (!pid) return;
-  try {
-    const q = JSON.parse(localStorage.getItem('darts_pending') || '[]');
-    localStorage.setItem('darts_pending', JSON.stringify(q.filter(x => x._pid !== pid)));
-  } catch(e) {}
-}
-
-function pendingGameCount() {
-  try { return JSON.parse(localStorage.getItem('darts_pending') || '[]').length; }
-  catch(e) { return 0; }
-}
-
-// Sends one queued item: the game document first, then each player's stats.
-// Every step is marked done individually so a retry never double-counts.
-async function sendPendingItem(item) {
-  const { _pid, _gameSaved, _profiles = [], ...data } = item;
-  if (!_gameSaved) {
     await db.collection('darts_games').add({ ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    updatePendingGame(_pid, it => { it._gameSaved = true; });
-  }
-  for (let i = 0; i < _profiles.length; i++) {
-    if (_profiles[i]._done) continue;
-    const good = await fbUpdatePlayerProfile(_profiles[i].id, _profiles[i]);
-    if (!good) throw new Error('profile update failed');
-    updatePendingGame(_pid, it => { if (it._profiles && it._profiles[i]) it._profiles[i]._done = true; });
-  }
-}
-
-async function flushPendingGames() {
-  if (!db || flushPendingGames._busy) return;
-  flushPendingGames._busy = true;
-  try {
-    let q = [];
-    try { q = JSON.parse(localStorage.getItem('darts_pending') || '[]'); } catch(e) { return; }
-    if (!q.length) return;
-    let sent = 0;
-    for (const item of q) {
-      try {
-        await sendPendingItem(item);
-        dequeuePendingGame(item._pid);
-        sent++;
-      } catch(e) { break; }   // still offline: keep the rest for the next attempt
-    }
-    if (sent) {
-      invalidateHistoryCache();
-      showToast(sent + ' peli\u00e4 synkronoitu \u2713', 'success');
-      if (S.screen === 'home') render();
-    }
-  } finally { flushPendingGames._busy = false; }
-}
-
-// The 400-game cap used to re-read the whole collection on every single save.
-// Check it occasionally instead.
-async function maybePruneGames() {
-  try {
-    const n = (parseInt(localStorage.getItem('darts_saveCount') || '0', 10) || 0) + 1;
-    localStorage.setItem('darts_saveCount', String(n));
-    if (n % 25 !== 0) return;
-    const all = await db.collection('darts_games').orderBy('createdAt', 'desc').get();
-    if (all.docs.length > 400) {
+    showToast('Peli tallennettu ✓', 'success'); invalidateHistoryCache();
+    // Auto-delete oldest games if over 400
+    const all = await db.collection('darts_games').orderBy('createdAt','desc').get();
+    if(all.docs.length > 400) {
+      const toDelete = all.docs.slice(400);
       const batch = db.batch();
-      all.docs.slice(400).forEach(d => batch.delete(d.ref));
+      toDelete.forEach(d => batch.delete(d.ref));
       await batch.commit();
     }
-  } catch(e) { console.error('maybePruneGames:', e); }
-}
-
-async function fbSaveGame(data, profiles) {
-  const pid = queuePendingGame(data, profiles);   // durable first, network second
-  if (!db) { showToast('Ei yhteytt\u00e4 \u2013 peli jonossa', 'error'); return false; }
-  try {
-    let item = null;
-    try { item = JSON.parse(localStorage.getItem('darts_pending') || '[]').find(x => x._pid === pid); } catch(e) {}
-    await sendPendingItem(item || { _pid: pid, _profiles: (profiles || []), ...data });
-    dequeuePendingGame(pid);
-    showToast('Peli tallennettu \u2713', 'success');
-    invalidateHistoryCache();
-    maybePruneGames();
-    return true;
-  } catch(e) {
-    console.error('fbSaveGame:', e);
-    showToast('Ei yhteytt\u00e4 \u2013 peli tallennetaan my\u00f6hemmin', 'error');
-    return false;
-  }
-}
-
-async function saveTournamentToFirebase(t) {
-  if (!t) return;
-  // Credit the champion before anything that can fail.
-  try {
-    if (t.champion && db) {
-      await db.collection('darts_players').doc(t.champion).update({
-        tournamentWins: firebase.firestore.FieldValue.increment(1)
-      });
-    }
-  } catch(e) { console.error('tournamentWins:', e); }
-  try {
-    if (!db) return;
-    await db.collection('darts_tournaments').add({
-      format: t.format || null,
-      champion: t.champion || null,
-      players: t.players || [],
-      gameType: t.gameType || null,
-      groupStandings: t.groupStandings || null,
-      knockoutMatches: t.knockoutMatches || null,
-      bracket: t.bracket || null,
-      finishedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    showToast('Turnaus tallennettu \u2713', 'success');
-  } catch(e) {
-    console.error('saveTournament:', e);
-    showToast('Turnauksen tallennus ep\u00e4onnistui', 'error');
-  }
+  } catch(e) { showToast('Tallennus epäonnistui', 'error'); console.error(e); }
 }
 
 async function fbLoadHistory() {
@@ -615,21 +478,16 @@ let S = {
 
 // Players stored in Firebase (not localStorage) so they persist across browser data clears
 async function loadPlayers() {
-  if (!db) { loadPlayersFromCache(); return; }
+  if (!db) return;
   try {
     const snap = await db.collection('darts_players').orderBy('name').get();
     S.players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     S.playersLoaded = true;
-    try { localStorage.setItem('darts_players_cache', JSON.stringify(S.players)); } catch(e) {}
-  } catch(e) { console.error('loadPlayers:', e); loadPlayersFromCache(); }
+  } catch(e) { console.error('loadPlayers:', e); S.players = []; }
 }
 
-// Offline sessions still need to know who is playing.
-function loadPlayersFromCache() {
-  try {
-    S.players = JSON.parse(localStorage.getItem('darts_players_cache') || '[]');
-    S.playersLoaded = true;
-  } catch(e) { S.players = []; }
+async function savePlayers() {
+  // No-op: players are saved individually via addPlayer/delPlayer
 }
 
 async function fbAddPlayer(p) {
@@ -650,80 +508,63 @@ async function fbUpdatePlayerStats(id, wins, games) {
   try { await db.collection('darts_players').doc(id).update({ wins, games }); } catch(e) { console.error(e); }
 }
 
-// Cumulative fields are written with FieldValue.increment so two devices
-// finishing games at the same time cannot overwrite each other's totals.
-async function fbUpdatePlayerProfile(id, opts) {
-  if (!db) return false;
-  const { didWin = false, gs = {}, isSolo = false } = opts || {};
-  const FV = firebase.firestore.FieldValue;
+async function fbUpdatePlayerProfile(id, wins, games, gs, isSolo=false) {
+  if (!db) return;
   try {
-    const ref = db.collection('darts_players').doc(id);
-    const doc = await ref.get();
+    // Load current player data to compare records
+    const doc = await db.collection('darts_players').doc(id).get();
     const cur = doc.exists ? doc.data() : {};
+    // Merge heatmap cumulatively
+    const curHm = cur.heatmap || {};
+    const newHm = gs.heatmap || {};
+    const mergedHm = {};
+    const hmKeys = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,'BULL','MISS'];
+    hmKeys.forEach(k=>{ mergedHm[k]=(curHm[k]||0)+(newHm[k]||0); });
 
-    // Streak is derived from the stored value and an explicit win flag,
-    // never by comparing a local counter against the server.
-    let streak = cur.streak || 0;
-    if (!isSolo) streak = didWin ? streak + 1 : 0;
-    const maxStreak = Math.max(cur.maxStreak || 0, streak);
+    // Calculate streak - only multi-player games affect streak
+    let streak = cur.streak||0;
+    if(!isSolo) {
+      if(wins > (cur.wins||0)) { streak++; } else { streak = 0; }
+    }
+    const maxStreak = Math.max(cur.maxStreak||0, streak);
+
+    // Track multi-player games separately for accurate win%
+    const multiGames = isSolo ? (cur.multiGames||0) : (cur.multiGames||0)+1;
+    const soloGames = isSolo ? (cur.soloGames||0)+1 : (cur.soloGames||0);
 
     const update = {
-      games:        FV.increment(1),
-      totalTurns:   FV.increment(gs.turns || 0),
-      totalPoints:  FV.increment(gs.totalPoints || 0),
-      totalBusts:   FV.increment(gs.busts || 0),
-      total180s:    FV.increment(gs.s180 || 0),
-      total100plus: FV.increment(gs.s100plus || 0),
-      streak, maxStreak,
-      bestTurn:     Math.max(cur.bestTurn || 0, gs.best || 0),
-      bestCheckout: Math.max(cur.bestCheckout || 0, gs.checkout || 0),
+      wins, games, streak, maxStreak, multiGames, soloGames,
+      totalTurns: (cur.totalTurns||0) + (gs.turns||0),
+      totalBusts: (cur.totalBusts||0) + (gs.busts||0),
+      total180s: (cur.total180s||0) + (gs.s180||0),
+      total100plus: (cur.total100plus||0) + (gs.s100plus||0),
+      bestTurn: Math.max(cur.bestTurn||0, gs.best||0),
+      bestCheckout: Math.max(cur.bestCheckout||0, gs.checkout||0),
+      allTimeAvg: (() => {
+        const prevAvgSum = (cur.allTimeAvgSum||0);
+        const newSum = prevAvgSum + (gs.avg||0) * (gs.turns||0);
+        const newTurns = (cur.totalTurns||0) + (gs.turns||0);
+        return newTurns > 0 ? Math.round(newSum/newTurns*10)/10 : 0;
+      })(),
+      allTimeAvgSum: (cur.allTimeAvgSum||0) + (gs.avg||0)*(gs.turns||0),
+      heatmap: mergedHm,
     };
-    if (isSolo) {
-      update.soloGames = FV.increment(1);
-    } else {
-      update.multiGames = FV.increment(1);
-      if (didWin) update.wins = FV.increment(1);
-    }
-    // Heatmap: increment each slot individually so merges are conflict-free.
-    const hm = gs.heatmap || {};
-    Object.keys(hm).forEach(k => { if (hm[k]) update['heatmap.' + k] = FV.increment(hm[k]); });
-
-    // Achievements are checked against the values this write will produce.
-    const projected = {
-      games:       (cur.games || 0) + 1,
-      wins:        (cur.wins || 0) + (!isSolo && didWin ? 1 : 0),
-      maxStreak,
-      total180s:   (cur.total180s || 0) + (gs.s180 || 0),
-      totalTurns:  (cur.totalTurns || 0) + (gs.turns || 0),
-      totalPoints: (cur.totalPoints || 0) + (gs.totalPoints || 0),
-      bestTurn:     update.bestTurn,
-      bestCheckout: update.bestCheckout,
-      tournamentWins: cur.tournamentWins || 0,
-    };
-    projected.allTimeAvg = projected.totalTurns
-      ? Math.round(projected.totalPoints / projected.totalTurns * 10) / 10 : 0;
-    // Denormalised copy for the leaderboard; the raw totals above stay authoritative.
-    update.allTimeAvg = projected.allTimeAvg;
-
-    const newAchievements = checkAchievements(projected, cur);
-    if (newAchievements.length) {
-      update.achievements = [...(cur.achievements || []), ...newAchievements];
+    // Check achievements
+    const newAchievements = checkAchievements(update, cur);
+    if(newAchievements.length > 0) {
+      update.achievements = [...(cur.achievements||[]), ...newAchievements];
+      // Show toast for each new achievement
       newAchievements.forEach(aid => {
-        const a = ACHIEVEMENTS.find(x => x.id === aid);
-        if (a) setTimeout(() => showToast('\ud83c\udf96\ufe0f Saavutus: ' + a.name, 'success'), 1500);
+        const a = ACHIEVEMENTS.find(x=>x.id===aid);
+        if(a) setTimeout(()=>showToast('🎖️ Saavutus: '+a.name, 'success'), 1500);
       });
     }
-    await ref.update(update);
-    return true;
-  } catch(e) { console.error('fbUpdatePlayerProfile:', e); return false; }
-}
-
-// Single source of truth for a player's all-time average.
-function playerAvg(p) {
-  if (!p) return 0;
-  if (p.totalTurns > 0 && typeof p.totalPoints === 'number')
-    return Math.round(p.totalPoints / p.totalTurns * 10) / 10;
-  return p.allTimeAvg || 0;
+    // Add max streak for achievement check
+    if(update.wins > (cur.wins||0)) {
+      update.maxStreak = Math.max(cur.maxStreak||0, update.streak||0);
+    }
+    await db.collection('darts_players').doc(id).update(update);
+  } catch(e) { console.error('fbUpdatePlayerProfile:', e); }
 }
 
 function genId() { return Math.random().toString(36).slice(2,10); }
@@ -763,8 +604,8 @@ const ACHIEVEMENTS = [
   { id:'checkout_100',  icon:'✅', name:'100+ checkout',        desc:'Lopeta peli 100+ checkoutilla',    check: p => (p.bestCheckout||0) >= 100 },
   { id:'checkout_140',  icon:'⚡', name:'140+ checkout',        desc:'Lopeta peli 140+ checkoutilla',    check: p => (p.bestCheckout||0) >= 140 },
   { id:'checkout_170',  icon:'🚀', name:'170 checkout',         desc:'Korkein mahdollinen checkout',     check: p => (p.bestCheckout||0) >= 170 },
-  { id:'avg_50',        icon:'📈', name:'Avg 50+',              desc:'All-time avg yli 50',              check: p => playerAvg(p) >= 50 },
-  { id:'avg_70',        icon:'📈📈','name':'Avg 70+',           desc:'All-time avg yli 70',              check: p => playerAvg(p) >= 70 },
+  { id:'avg_50',        icon:'📈', name:'Avg 50+',              desc:'All-time avg yli 50',              check: p => (p.allTimeAvg||0) >= 50 },
+  { id:'avg_70',        icon:'📈📈','name':'Avg 70+',           desc:'All-time avg yli 70',              check: p => (p.allTimeAvg||0) >= 70 },
   { id:'best_turn_100', icon:'💣', name:'100+ vuoro',           desc:'Heitä yli 100 yhdellä vuorolla',  check: p => (p.bestTurn||0) >= 100 },
   { id:'best_turn_140', icon:'💣💣','name':'140+ vuoro',        desc:'Heitä yli 140 yhdellä vuorolla',  check: p => (p.bestTurn||0) >= 140 },
   { id:'darts_1000',    icon:'🏹', name:'1000 tikkaa',          desc:'Heitä 1000 tikkaa yhteensä',      check: p => ((p.totalTurns||0)*3) >= 1000 },
@@ -787,8 +628,6 @@ const GAMES = [
   { id:'701',        name:'701',              icon:'🎯', desc:'Pidempi versio tiukoille pelaajille.' },
   { id:'cricket',    name:'Cricket',          icon:'🏏', desc:'Avaa numerot 15–20 + Bull. Pisteet American-moodissa.', hot:true },
   { id:'atc',        name:'Around the Clock', icon:'🕐', desc:'Osu numerot 1–20 järjestyksessä. Ensimmäinen läpi voittaa.' },
-  { id:'shanghai',   name:'Shanghai',         icon:'🏹', desc:'7 kierrosta, kohteet 1–7. Single+Double+Triple samalla vuorolla = välitön voitto.' },
-  { id:'halveit',    name:'Halve It',         icon:'✂️', desc:'Osu kierroksen kohteeseen tai pisteesi puolittuvat.' },
   { id:'custom_x01', name:'Oma X01',          icon:'⚙️', desc:'Aseta aloituspisteet itse haluamallesi lukumäärälle.' },
 ];
 
@@ -829,10 +668,7 @@ function validCheckout(dart, mode, remaining) {
   const v = dartValue(dart);
   if (v !== remaining) return false;
   if (mode === 'any') return true;
-  // "Single out" (straight out) means the finishing dart may be ANY segment.
-  // The old check rejected doubles, triples and the bull, which contradicted
-  // the in-app description ("lopetus millä vain") and standard darts rules.
-  if (mode === 'single') return true;
+  if (mode === 'single') return !dart.startsWith('T') && !dart.startsWith('D') && dart !== 'BULL';
   if (mode === 'double') return dart.startsWith('D') || dart === 'BULL';
   if (mode === 'master') return dart.startsWith('D') || dart.startsWith('T') || dart === 'BULL';
   return false;
@@ -908,24 +744,13 @@ function renderHome() {
         <span class="dart">🎯</span>
         <h1>DARTS</h1>
         <p>Pelin seurantasovellus</p>
-        <div style="font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:2px;">v${APP_VERSION}</div>
         <div style="margin-top:4px;font-size:11px;color:var(--muted);">${currentUser?currentUser.email:''}</div>
       </div>
-      <button onclick="confirmLogout()"
+      <button onclick="if(confirm('Kirjaudutaanko ulos?'))logout()"
         style="position:absolute;top:12px;right:16px;background:none;border:1px solid rgba(255,51,85,0.3);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:8px;cursor:pointer;font-family:var(--fu);font-weight:600;letter-spacing:1px;">
         ULOS
       </button>
     </div>
-    ${S.offline ? `<div style="margin:0 16px 8px;padding:9px 12px;border-radius:10px;
-        background:rgba(255,51,85,0.10);border:1px solid rgba(255,51,85,0.35);
-        font-size:12px;color:#ff8098;text-align:center;">
-        \u26a0\ufe0f Offline \u2013 tulokset tallennetaan laitteelle ja synkronoidaan kun yhteys palaa
-      </div>` : ''}
-    ${pendingGameCount() ? `<div style="margin:0 16px 8px;padding:9px 12px;border-radius:10px;
-        background:rgba(255,215,0,0.10);border:1px solid rgba(255,215,0,0.35);
-        font-size:12px;color:var(--gold);text-align:center;">
-        \u23f3 ${pendingGameCount()} peli\u00e4 odottaa tallennusta
-      </div>` : ''}
     <div class="home-menu">
       <button class="menu-btn primary" onclick="startNew()">
         <span class="icon">🎮</span><span class="label">UUSI PELI</span><span class="arrow">›</span>
@@ -967,16 +792,6 @@ function renderHome() {
   return div;
 }
 
-function confirmLogout() {
-  // An in-progress game is discarded on logout: say so before doing it.
-  const warn = S.game
-    ? 'Kesken oleva peli menetet\u00e4\u00e4n. Kirjaudutaanko silti ulos?'
-    : 'Kirjaudutaanko ulos?';
-  const queued = pendingGameCount();
-  const extra = queued ? '\n\nHuom: ' + queued + ' peli\u00e4 odottaa yh\u00e4 tallennusta.' : '';
-  if (confirm(warn + extra)) logout();
-}
-
 function startNew() {
   S.setup = { gameType:null, config:{}, selected:[] };
   nav('setup-type');
@@ -990,11 +805,11 @@ function renderPlayers() {
     const winPct = (p.multiGames||0)>0?Math.round((p.wins||0)/p.multiGames*100):0;
     return `
     <div class="player-card" onclick="showPlayerProfile('${p.id}')" style="cursor:pointer;border-left:3px solid ${col.bg};">
-      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${esc((p.name||'?')[0]).toUpperCase()}</div>
+      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
       <div style="flex:1">
         <div class="player-name">${esc(p.name)}</div>
         <div class="player-stat">${p.multiGames||0} moninpeliä · ${p.wins||0} voittoa · ${p.multiGames>0?Math.round(p.wins/p.multiGames*100):0}%${p.soloGames?' · '+p.soloGames+' solo':''}</div>
-        ${p.bestTurn?`<div style="font-size:11px;color:${col.bg};margin-top:2px;">⚡ Paras vuoro: ${p.bestTurn} · Avg: ${playerAvg(p)}</div>`:''}
+        ${p.bestTurn?`<div style="font-size:11px;color:${col.bg};margin-top:2px;">⚡ Paras vuoro: ${p.bestTurn} · Avg: ${p.allTimeAvg||0}</div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
         <button class="player-del" onclick="event.stopPropagation();delPlayer('${p.id}')">Poista</button>
@@ -1023,11 +838,9 @@ async function addPlayer() {
   const name = input.value.trim();
   if (!name) return;
   if (S.players.find(p => p.name.toLowerCase() === name.toLowerCase())) { showToast('Pelaaja on jo listassa','error'); return; }
-  if (!db) { showToast('Ei yhteytt\u00e4 \u2013 pelaajaa ei voi lis\u00e4t\u00e4 nyt', 'error'); return; }
   let p = { id:genId(), name, wins:0, games:0 };
   p = await fbAddPlayer(p);
   S.players.push(p);
-  try { localStorage.setItem('darts_players_cache', JSON.stringify(S.players)); } catch(e) {}
   nav('players');
 }
 
@@ -1035,7 +848,6 @@ async function delPlayer(id) {
   if (!confirm('Poistetaanko pelaaja?')) return;
   await fbDeletePlayer(id);
   S.players = S.players.filter(p => p.id !== id);
-  try { localStorage.setItem('darts_players_cache', JSON.stringify(S.players)); } catch(e) {}
   nav('players');
 }
 
@@ -1090,7 +902,7 @@ function renderSetupConfig() {
         <div class="config-label">Aloituspisteet</div>
         <div class="number-input-row">
           <button class="spinner-btn" onclick="adjScore(-50)">−</button>
-          <input class="number-spinner" id="custom-start-score" type="number" value="${config.startScore}" min="101" max="9999" step="50"
+          <input class="number-spinner" id="cscore" type="number" value="${config.startScore}" min="101" max="9999" step="50"
             oninput="S.setup.config.startScore=Math.max(101,parseInt(this.value)||101)">
           <button class="spinner-btn" onclick="adjScore(50)">+</button>
         </div>
@@ -1110,7 +922,7 @@ function renderSetupConfig() {
           <b style="color:var(--text)">Double Out</b> – lopetus tuplalla tai bullseyellä (kilpailuperinne)<br>
           <b style="color:var(--text)">Single Out</b> – lopetus millä vain<br>
           <b style="color:var(--text)">Master Out</b> – lopetus tuplalla tai triplalla<br>
-          <b style="color:var(--text)">Vapaa</b> – ei rajoituksia (sama kuin Single Out)
+          <b style="color:var(--text)">Vapaa</b> – ei rajoituksia
         </div>
       </div>
       <div class="config-section">
@@ -1159,7 +971,7 @@ function renderSetupConfig() {
 
 function setCfg(k,v) { S.setup.config[k]=v; }
 function adjScore(d) {
-  const inp = document.getElementById('custom-start-score');
+  const inp = document.getElementById('cscore');
   let v = (parseInt(inp.value)||501) + d;
   v = Math.max(101, Math.min(9999, v));
   inp.value = v; S.setup.config.startScore = v;
@@ -1186,7 +998,7 @@ function renderSetupPlayers() {
     return `
       <div class="player-select-card ${on?'selected':''}" onclick="toggleSel('${p.id}')"
         style="${on?'border-color:'+col.bg+';background:'+col.bg+'18;':''}">
-        <div class="player-avatar" style="background:${avatarCol.bg};color:${avatarCol.text};">${esc((p.name||'?')[0]).toUpperCase()}</div>
+        <div class="player-avatar" style="background:${avatarCol.bg};color:${avatarCol.text};">${p.name[0].toUpperCase()}</div>
         <div class="player-name">${esc(p.name)}</div>
         <div style="display:flex;align-items:center;gap:8px;">
           ${on?`<span style="font-size:12px;color:${col.bg};font-weight:700;">#${selIdx+1}</span>`:''}
@@ -1271,12 +1083,6 @@ function startGame() {
   } else if (gameType === 'halveit') {
     S.game = { ...base, roundIndex:0, targets:HALVEIT_TARGETS, players: players.map(p => ({ id:p.id, name:p.name, score:0, turnPts:0, history:[] })) };
   }
-  if (!S.game || S.game.type !== gameType) {
-    showToast('Tuntematon pelityyppi: ' + gameType, 'error');
-    S.game = null;
-    nav('setup-type');
-    return;
-  }
   S.game.scoreMode = 'dart';
   S.game.sumInput = '';
   localStorage.setItem('darts_game', JSON.stringify(S.game));
@@ -1289,10 +1095,8 @@ function renderGame() {
   if (!g) return renderHome();
   // Persist game state so it survives page refresh/app switch
   try { localStorage.setItem('darts_game', JSON.stringify(g)); } catch(e) {}
-  if (g.type === 'cricket')  return renderCricket();
-  if (g.type === 'atc')      return renderATC();
-  if (g.type === 'shanghai') return renderShanghai();
-  if (g.type === 'halveit')  return renderHalveIt();
+  if (g.type === 'cricket') return renderCricket();
+  if (g.type === 'atc') return renderATC();
   return renderX01();
 }
 
@@ -1438,14 +1242,13 @@ function processX01(dart) {
   const p = g.players[g.currentPlayerIndex];
   const val = dartValue(dart);
   const newScore = p.score - val;
-  // Record the dart before branching so winning and busting darts are not lost.
-  trackHeatmap(p, dart);
 
   if (newScore < 0) {
     g.currentDarts.push(dart);
+    trackHeatmap(p, dart);
     showBust(() => {
       p.score = g.turnStartScore;
-      p.history.push({ darts:[...g.currentDarts], bust:true, leg:(g.legIndex||0) });
+      p.history.push({ darts:[...g.currentDarts], bust:true });
       g.currentDarts = []; g.modifier = null;
       advanceX01();
     });
@@ -1457,7 +1260,7 @@ function processX01(dart) {
       g.currentDarts.push(dart);
       showBust(() => {
         p.score = g.turnStartScore;
-        p.history.push({ darts:[...g.currentDarts], bust:true, leg:(g.legIndex||0) });
+        p.history.push({ darts:[...g.currentDarts], bust:true });
         g.currentDarts = []; g.modifier = null;
         advanceX01();
       });
@@ -1465,8 +1268,7 @@ function processX01(dart) {
     }
     g.currentDarts.push(dart);
     p.score = 0;
-    p.history.push({ darts:[...g.currentDarts], scored:g.currentDarts.reduce((s,d)=>s+dartValue(d),0),
-                     leg:(g.legIndex||0), legWon:true });
+    p.history.push({ darts:[...g.currentDarts], scored:g.currentDarts.reduce((s,d)=>s+dartValue(d),0) });
     p.legsWon = (p.legsWon||0)+1;
     // Check if player has won enough legs
     if(p.legsWon >= (g.legsToWin||1)) {
@@ -1505,9 +1307,7 @@ function processX01(dart) {
       // Start new leg
       showToast(p.name+' voitti erän! '+p.legsWon+'/'+(g.legsToWin||1), 'success');
       g.currentDarts=[]; g.modifier=null;
-      // Keep history across legs: every stat in endGame() is derived from it.
-      g.legIndex = (g.legIndex||0)+1;
-      g.players.forEach(pl=>{ pl.score=g.startScore; });
+      g.players.forEach(pl=>{ pl.score=g.startScore; pl.history=[]; });
       g.currentPlayerIndex=(g.currentPlayerIndex+1)%g.players.length;
       g.turnStartScore=g.startScore;
       render();
@@ -1520,7 +1320,7 @@ function processX01(dart) {
     g.currentDarts.push(dart);
     showBust(() => {
       p.score = g.turnStartScore;
-      p.history.push({ darts:[...g.currentDarts], bust:true, leg:(g.legIndex||0) });
+      p.history.push({ darts:[...g.currentDarts], bust:true });
       g.currentDarts = []; g.modifier = null;
       advanceX01();
     });
@@ -1528,6 +1328,12 @@ function processX01(dart) {
   }
 
   g.currentDarts.push(dart);
+  // Track heatmap
+  if(p.heatmap !== undefined) {
+    const numStr = dart.replace(/^[TDB]/,'');
+    const key = dart==='MISS'?'MISS':dart==='BULL'||dart==='25'?'BULL':parseInt(numStr);
+    if(key !== undefined && p.heatmap[key] !== undefined) p.heatmap[key]++;
+  }
   p.score = newScore;
   if (g.currentDarts.length >= 3) setTimeout(()=>x01Next(),300);
   else { const fromVal=g.turnStartScore-g.currentDarts.slice(0,-1).reduce((s,d)=>s+dartValue(d),0); render(); animateScore(fromVal,p.score,g.checkoutMode); }
@@ -1711,7 +1517,7 @@ function sumSkip() {
   // Skip = bust, advance to next player
   const g = S.game;
   const p = g.players[g.currentPlayerIndex];
-  p.history.push({ darts:[], scored:0, bust:true, sum:true, leg:(g.legIndex||0) });
+  p.history.push({ darts:[], scored:0, bust:true, sum:true });
   g.sumInput = '';
   advanceX01();
 }
@@ -1723,11 +1529,11 @@ function sumConfirm() {
   g.sumInput = '';
   const newScore = p.score - val;
 
-  // Busting also covers leaving 1 on double/master out, which is unfinishable.
-  if(newScore < 0 || (newScore === 1 && (g.checkoutMode === 'double' || g.checkoutMode === 'master'))) {
+  if(newScore < 0) {
+    // Bust
     showBust(() => {
       p.score = g.turnStartScore;
-      p.history.push({ darts:[], scored:val, bust:true, sum:true, leg:(g.legIndex||0) });
+      p.history.push({ darts:[], scored:val, bust:true, sum:true });
       advanceX01();
     });
     return;
@@ -1736,7 +1542,7 @@ function sumConfirm() {
   if(newScore === 0) {
     // Win
     p.score = 0;
-    p.history.push({ darts:[], scored:val, sum:true, leg:(g.legIndex||0), legWon:true });
+    p.history.push({ darts:[], scored:val, sum:true });
     p.legsWon = (p.legsWon||0)+1;
     if(p.legsWon >= (g.legsToWin||1)) {
       if(g.players.length >= 3 && !g.finalists) {
@@ -1768,8 +1574,7 @@ function sumConfirm() {
       endGame();
     } else {
       showToast(p.name+' voitti erän!', 'success');
-      g.legIndex = (g.legIndex||0)+1;
-      g.players.forEach(pl=>{ pl.score=g.startScore; });
+      g.players.forEach(pl=>{ pl.score=g.startScore; pl.history=[]; });
       g.currentPlayerIndex=(g.currentPlayerIndex+1)%g.players.length;
       g.turnStartScore=g.startScore;
       render();
@@ -1778,17 +1583,17 @@ function sumConfirm() {
   }
 
   p.score = newScore;
-  p.history.push({ darts:[], scored:val, sum:true, leg:(g.legIndex||0) });
+  p.history.push({ darts:[], scored:val, sum:true });
   advanceX01();
 }
 
 function x01Next() {
   const g = S.game;
   const p = g.players[g.currentPlayerIndex];
-  // Even a turn with no registered darts is a turn: record it as 0 so the
-  // 3-dart average is not silently inflated by skipped turns.
-  const sc = g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
-  p.history.push({ darts:[...g.currentDarts], scored:sc, leg:(g.legIndex||0) });
+  if (g.currentDarts.length) {
+    const sc = g.currentDarts.reduce((s,d)=>s+dartValue(d),0);
+    p.history.push({ darts:[...g.currentDarts], scored:sc });
+  }
   g.currentDarts = []; g.modifier = null; g.editMode = false;
   advanceX01();
 }
@@ -2233,23 +2038,22 @@ function endGame() {
   const isX01gs = ['501','301','701','custom_x01'].includes(g.type);
   if(isX01gs) {
     g.players.forEach(pl => {
+      const turns = (pl.history||[]).filter(h=>!h.bust&&h.scored>0);
+      const scores = turns.map(h=>h.scored);
       const allTurns = pl.history||[];
-      const scoringTurns = allTurns.filter(h=>!h.bust);
-      const scores = scoringTurns.map(h=>h.scored||0);
-      const totalPoints = scores.reduce((a,b)=>a+b,0);
       const busts = allTurns.filter(h=>h.bust).length;
-      // Competition standard: a busted turn is a 0-point turn, not a missing one.
-      // Averaging over every thrown turn is the only figure that can be summed
-      // across games without drifting.
-      const turns = allTurns.length;
-      const avg = turns ? Math.round(totalPoints/turns*10)/10 : 0;
+      const avg = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
       const best = scores.length ? Math.max(...scores) : 0;
       const s180 = scores.filter(s=>s===180).length;
       const s100plus = scores.filter(s=>s>=100).length;
-      // Best checkout over every leg this player closed, not just the last turn.
-      const checkout = allTurns.filter(h=>h.legWon).reduce((m,h)=>Math.max(m, h.scored||0), 0);
+      // Highest checkout = last scored turn of winner
+      let checkout = 0;
+      if(g.winner && pl.id===g.winner.id && allTurns.length) {
+        const lastTurn = allTurns[allTurns.length-1];
+        if(!lastTurn.bust) checkout = lastTurn.scored||0;
+      }
       const heatmap = pl.heatmap || {};
-      gamePlayerStats[pl.id] = { avg, best, busts, turns, totalPoints, s180, s100plus, checkout, heatmap };
+      gamePlayerStats[pl.id] = { avg, best, busts, turns:allTurns.length, s180, s100plus, checkout, heatmap };
     });
   }
 
@@ -2265,15 +2069,6 @@ function endGame() {
     });
   }
 
-  // Collect stat updates so they travel with the game through the offline queue.
-  const isSoloGame = g.players.length < 2;
-  const profileUpdates = g.players.map(gp => ({
-    id: gp.id,
-    didWin: !isSoloGame && !!(g.winner && g.winner.id === gp.id),
-    gs: gamePlayerStats[gp.id] || {},
-    isSolo: isSoloGame,
-  }));
-
   fbSaveGame({
     type:g.type,
     winner:g.players.length>=2&&g.winner?{id:g.winner.id,name:g.winner.name}:null,
@@ -2285,18 +2080,18 @@ function endGame() {
     duration:dur,
     turnLog: turnLog.slice(0,200),
     playerStats: gamePlayerStats,
-  }, profileUpdates);
+  });
 
   // Solo game = 1 pelaaja → ei voittoa tilastoihin
-  const isSolo = isSoloGame;
+  const isSolo = g.players.length < 2;
   if(!isSolo && g.winner){const w=S.players.find(p=>p.id===g.winner.id);if(w){w.wins=(w.wins||0)+1;}}
   g.players.forEach(gp=>{
     const p=S.players.find(p=>p.id===gp.id);
     if(p){
       p.games=(p.games||0)+1;
       if(!isSolo) p.multiGames=(p.multiGames||0)+1;
-      // Stats are written by fbSaveGame/flushPendingGames so that a failed
-      // save retries the game record and the profile update together.
+      const gs=gamePlayerStats[gp.id]||{};
+      fbUpdatePlayerProfile(p.id, p.wins, p.games, gs, isSolo);
     }
   });
   localStorage.removeItem('darts_game');
@@ -2311,9 +2106,9 @@ function endGame() {
 function calcTurnStats(g) {
   if(!['501','301','701','custom_x01'].includes(g?.type)) return null;
   return g.players.map(p=>{
-    const all=p.history||[];
-    const sc=all.filter(h=>!h.bust).map(h=>h.scored||0);
-    const avg=all.length?Math.round(sc.reduce((a,b)=>a+b,0)/all.length*10)/10:0;
+    const turns=(p.history||[]).filter(h=>!h.bust&&h.scored>0);
+    const sc=turns.map(h=>h.scored);
+    const avg=sc.length?Math.round(sc.reduce((a,b)=>a+b,0)/sc.length):0;
     const best=sc.length?Math.max(...sc):0;
     const busts=(p.history||[]).filter(h=>h.bust).length;
     return {name:p.name,id:p.id,avg,best,busts,turns:p.history?.length||0};
@@ -2521,9 +2316,7 @@ async function goStats() {
       // Merge per-game stats
       const ps = g.playerStats?.[p.id];
       if(ps) {
-        // Newer records carry exact totalPoints; older ones only avg*turns.
-        if(typeof ps.totalPoints==='number'&&ps.turns){st[p.id].avgSum+=ps.totalPoints;st[p.id].avgCount+=ps.turns;}
-        else if(ps.avg&&ps.turns){st[p.id].avgSum+=(ps.avg*ps.turns);st[p.id].avgCount+=ps.turns;}
+        if(ps.avg&&ps.turns){st[p.id].avgSum+=(ps.avg*ps.turns);st[p.id].avgCount+=ps.turns;}
         if(ps.best>st[p.id].bestTurn) st[p.id].bestTurn=ps.best;
         if(ps.checkout>st[p.id].bestCheckout) st[p.id].bestCheckout=ps.checkout;
         st[p.id].total180+=(ps.s180||0);
@@ -2563,7 +2356,7 @@ function renderStats() {
       const last10bars=s.last10.map(w=>`<div style="flex:1;height:${w?'100%':'40%'};background:${w?col.bg:'var(--border)'};border-radius:3px 3px 0 0;align-self:flex-end;min-height:6px;transition:height 0.4s;"></div>`).join('');
       const streakEmoji=s.streak>=3?'🔥':s.streak>=2?'✨':'';
       return `<div class="stat-card" style="border-left:3px solid ${col.bg};">
-        <div class="stat-name" style="color:${col.bg};">${esc(s.name)}</div>
+        <div      <div class="stat-name" style="color:${col.bg};">${esc(s.name)}</div>
 
         <div style="font-size:11px;color:var(--accent);letter-spacing:2px;margin:8px 0 4px;">⚔️ MONINPELI</div>
         <div class="stat-row"><span>Pelattu</span><span class="stat-val">${s.multiGames||0} peliä</span></div>
@@ -2646,7 +2439,7 @@ function renderTournamentSetup() {
     const col = playerColor(idx);
     return `<div class="player-select-card ${on?'selected':''}" onclick="toggleTournamentPlayer('${p.id}')"
       style="border-color:${on?col.bg:'var(--border)'};${on?'background:'+col.bg+'18;':''}">
-      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${esc((p.name||'?')[0]).toUpperCase()}</div>
+      <div class="player-avatar" style="background:${col.bg};color:${col.text};">${p.name[0].toUpperCase()}</div>
       <div class="player-name">${esc(p.name)}</div>
       <div class="checkmark" style="${on?'background:'+col.bg+';border-color:'+col.bg+';color:'+col.text+';':''}">${on?'✓':''}</div>
     </div>`;
@@ -2936,18 +2729,8 @@ function tAdvanceKnockout() {
   const winners = round.filter(m=>m.p2!=='bye'||m.winner).map(m=>m.winner);
   const losers = round.filter(m=>m.p2!=='bye'&&m.winner).map(m=>m.winner===m.p1?m.p2:m.p1);
 
-  // Final reached: one winner left and nothing pending -> champion.
-  if(winners.length===1 && !t.losersMatch) {
-    t.done=true; t.champion=winners[0];
-    saveTournamentLocal();
-    saveTournamentToFirebase(t).catch(e=>console.error(e));
-    nav('tournament-bracket');
-    return;
-  }
-
-  // Loser's match: only when an ODD number of 3+ winners advance and at least
-  // two losers are available to play it. startLosersMatch() needs 2 players.
-  if(winners.length%2===1 && winners.length>1 && losers.length>=2 && !t.losersMatch) {
+  // Check for loser's match (odd winners)
+  if(winners.length%2===1 && losers.length>0 && !t.losersMatch) {
     // Need loser's match
     t.losersMatch = {players:losers, winner:null, roundIdx:t.knockoutRound};
     nav('tournament-bracket');
@@ -2969,8 +2752,7 @@ function tAdvanceKnockout() {
 
   if(allAdvancing.length===1) {
     t.done=true; t.champion=allAdvancing[0];
-    saveTournamentLocal();
-    saveTournamentToFirebase(t).catch(e=>console.error(e));
+    saveTournamentToFirebase(t);
     nav('tournament-bracket');
     return;
   }
@@ -3159,8 +2941,7 @@ function quickTournamentMatchDone(winnerId, cm) {
     const winners = roundMatches.map(m=>m.winner);
     if(winners.length===1){
       t.done=true; t.champion=winners[0];
-      saveTournamentLocal();
-      saveTournamentToFirebase(t).catch(e=>console.error(e));
+      saveTournamentToFirebase(t);
       nav('tournament-bracket'); return;
     }
     const nextRound=[];
@@ -3340,7 +3121,7 @@ function renderLongTournamentBracket(div) {
         if(s.points !== above.points) {
           howBeat = '';  // Clear points difference - obvious
         } else if(s.legWins !== above.legWins) {
-          howBeat = `🏅 Erävoitot ratkaisivat – ${esc(tPName(s.id))}: ${s.legWins}ev vs ${esc(tPName(above.id))}: ${above.legWins}ev`;
+          howBeat = `🏅 Erävoitot ratkaisivat – ${tPName(s.id)}: ${s.legWins}ev vs ${tPName(above.id)}: ${above.legWins}ev`;
         } else {
           const h2h = tHeadToHead(s.id, above.id);
           if(h2h !== 0) howBeat = `⚔️ Keskinäinen ottelu ratkaisi (pisteet ja erät olivat tasan)`;
@@ -3492,8 +3273,8 @@ function renderLongTournamentBracket(div) {
 }
 
 function tMatchCard(p1id, p2id, winner, playable, onclick, extra='') {
-  const p1n = esc(tPName(p1id));
-  const p2n = p2id==='bye'?'—':esc(tPName(p2id));
+  const p1n = tPName(p1id);
+  const p2n = p2id==='bye'?'—':tPName(p2id);
   const col1 = tPCol(p1id).bg;
   const col2 = p2id==='bye'?'var(--muted)':tPCol(p2id).bg;
   return `<div style="margin:0 14px 8px;background:rgba(22,22,34,0.8);border:1px solid ${winner?'rgba(0,232,122,0.3)':'var(--border)'};border-radius:12px;overflow:hidden;${playable?'cursor:pointer;':''}" ${playable?'onclick="'+onclick+'"':''}>
@@ -3622,7 +3403,7 @@ function renderPlayerProfile() {
       <!-- HERO -->
       <div style="background:linear-gradient(135deg,${col.bg}22,${col.bg}08);border-bottom:1px solid ${col.bg}33;padding:20px 16px;display:flex;align-items:center;gap:16px;">
         <div style="width:64px;height:64px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:32px;font-weight:700;box-shadow:0 0 24px ${col.bg}55;">
-          ${esc((p.name||'?')[0]).toUpperCase()}
+          ${p.name[0].toUpperCase()}
         </div>
         <div>
           <div style="font-family:var(--fd);font-size:32px;color:${col.bg};letter-spacing:2px;">${esc(p.name).toUpperCase()}</div>
@@ -3634,7 +3415,7 @@ function renderPlayerProfile() {
       <!-- KEY STATS GRID -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border);margin-bottom:12px;">
         ${[
-          ['Avg / vuoro', playerAvg(p)||'–', col.bg],
+          ['Avg / vuoro', p.allTimeAvg||'–', col.bg],
           ['Paras vuoro', p.bestTurn||'–', 'var(--gold)'],
           ['Korkein checkout', p.bestCheckout||'–', 'var(--accent)'],
           ['180-kierrokset', p.total180s||0, '#ff6b35'],
@@ -3760,7 +3541,7 @@ function renderLeaderboard() {
   const sorted = [...players].filter(p=>p.games>0).sort((a,b)=>{
     if(sort==='wins') return (b.wins||0)-(a.wins||0);
     if(sort==='winpct') return ((b.wins||0)/(b.multiGames||1))-((a.wins||0)/(a.multiGames||1));
-    if(sort==='avg') return playerAvg(b)-playerAvg(a);
+    if(sort==='avg') return (b.allTimeAvg||0)-(a.allTimeAvg||0);
     if(sort==='games') return (b.games||0)-(a.games||0);
     if(sort==='streak') return (b.maxStreak||0)-(a.maxStreak||0);
     return 0;
@@ -3772,16 +3553,16 @@ function renderLeaderboard() {
     const winPct = (p.multiGames||0)>0?Math.round((p.wins||0)/p.multiGames*100):0;
     return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:rgba(22,22,34,0.75);backdrop-filter:blur(10px);border:1px solid ${i<3?col.bg+'44':'var(--border)'};border-radius:12px;margin-bottom:7px;${i===0?'border-width:2px;':''}">
       <div style="font-size:${i<3?'24':'18'}px;min-width:32px;text-align:center;">${medals[i]||'#'+(i+1)}</div>
-      <div style="width:36px;height:36px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:18px;flex-shrink:0;">${esc((p.name||'?')[0]).toUpperCase()}</div>
+      <div style="width:36px;height:36px;border-radius:50%;background:${col.bg};color:${col.text};display:flex;align-items:center;justify-content:center;font-family:var(--fd);font-size:18px;flex-shrink:0;">${p.name?.[0]?.toUpperCase()||'?'}</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:16px;font-weight:700;color:${col.bg};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name||'?')}</div>
-        <div style="font-size:11px;color:var(--muted);">${p.games||0} peliä · avg ${playerAvg(p)} · putki ${p.maxStreak||0}</div>
+        <div style="font-size:11px;color:var(--muted);">${p.games||0} peliä · avg ${p.allTimeAvg||0} · putki ${p.maxStreak||0}</div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-family:var(--fd);font-size:22px;color:${sort==='winpct'?'var(--gold)':sort==='avg'?'var(--blue)':'var(--accent)'};">${
           sort==='wins'?p.wins||0:
           sort==='winpct'?winPct+'%':
-          sort==='avg'?playerAvg(p):
+          sort==='avg'?p.allTimeAvg||0:
           sort==='games'?p.games||0:
           p.maxStreak||0
         }</div>
@@ -3841,7 +3622,7 @@ function renderRecords() {
     const records = [
       { icon:'⚡', label:'Korkein checkout',        ...best(p=>p.bestCheckout||0, v=>v+' pts') },
       { icon:'💥', label:'Paras yksittäinen vuoro',  ...best(p=>p.bestTurn||0, v=>v+' pts') },
-      { icon:'📈', label:'Paras all-time avg',        ...best(p=>playerAvg(p), v=>v+' pts/vuoro') },
+      { icon:'📈', label:'Paras all-time avg',        ...best(p=>p.allTimeAvg||0, v=>v+' pts/vuoro') },
       { icon:'🎰', label:'Eniten 180-kierroksia',     ...best(p=>p.total180s||0, v=>v+'×') },
       { icon:'💯', label:'Eniten 100+ kierroksia',    ...best(p=>p.total100plus||0, v=>v+'×') },
       { icon:'🏆', label:'Eniten voittoja',           ...best(p=>p.wins||0, v=>v+' voittoa') },
@@ -3905,7 +3686,7 @@ function renderRecords() {
       const statRows = [
         ['⚡','Korkein checkout', (curP.bestCheckout||0)+' pts'],
         ['💥','Paras yksittäinen vuoro', (curP.bestTurn||0)+' pts'],
-        ['📈','All-time avg', playerAvg(curP)+' pts/vuoro'],
+        ['📈','All-time avg', (curP.allTimeAvg||0)+' pts/vuoro'],
         ['🎰','180-kierrokset', (curP.total180s||0)+'×'],
         ['💯','100+ kierrokset', (curP.total100plus||0)+'×'],
         ['🏆','Voittoja', (curP.wins||0)+' / '+(curP.multiGames||0)+' moninpeliä'],
@@ -3987,44 +3768,34 @@ function el(tag,cls){ const d=document.createElement(tag); if(cls)d.className=cl
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ==================== INIT ====================
-function restoreLocalState() {
-  try {
-    const saved = localStorage.getItem('darts_game');
-    if (saved) { S.game = JSON.parse(saved); S.screen = 'game'; }
-  } catch(e) { localStorage.removeItem('darts_game'); }
-  try {
-    const savedT = localStorage.getItem('darts_tournament');
-    // A tournament and an in-progress match are independent. Restoring only one
-    // of them silently drops the finished match from the bracket.
-    if (savedT) {
-      const t = JSON.parse(savedT);
-      if (t && t.format) S.tournament = t;
-    }
-  } catch(e) { localStorage.removeItem('darts_tournament'); }
-}
-
 async function init() {
-  const ok = initFirebase();
-
-  // No SDK (offline first load, blocked CDN): do NOT strand the user on the
-  // login screen. Restore what is on the device and let them keep playing.
-  if (!ok || !auth) {
-    S.offline = true;
-    restoreLocalState();
-    loadPlayersFromCache();
-    render();
-    setTimeout(() => showToast('Offline \u2013 tulokset tallennetaan kun yhteys palaa', 'error'), 400);
-    return;
-  }
-
+  initFirebase();
+  // Check auth state first
   initAuth(async (user) => {
-    if (!user) { renderLoginScreen(); return; }
+    if (!user) {
+      renderLoginScreen();
+      return;
+    }
     currentUser = user;
-    S.offline = false;
-    restoreLocalState();
+    // Restore in-progress game
+    try {
+      const saved = localStorage.getItem('darts_game');
+      if (saved) {
+        S.game = JSON.parse(saved);
+        S.screen = 'game';
+      }
+    } catch(e) { localStorage.removeItem('darts_game'); }
+    // Restore in-progress tournament
+    try {
+      const savedT = localStorage.getItem('darts_tournament');
+      if (savedT && !S.game) {
+        const t = JSON.parse(savedT);
+        if(t && t.format) { S.tournament = t; }
+      }
+    } catch(e) { localStorage.removeItem('darts_tournament'); }
+    // Load players from Firebase
     await loadPlayers();
     render();
-    flushPendingGames();
   });
 }
 function setAppHeight() {
@@ -4037,10 +3808,8 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', setAppHeight);
   window.visualViewport.addEventListener('scroll', setAppHeight);
 }
-window.addEventListener('online', () => { if(db) flushPendingGames(); });
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible') {
-    if(db) flushPendingGames();
     setTimeout(setAppHeight, 100);
     setTimeout(setAppHeight, 500);
   }
