@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Darts">
 <link rel="apple-touch-icon" href="icon-512.png">
+<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
@@ -315,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.0';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.1';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -341,7 +342,9 @@ function initFirebase() {
     auth = firebase.auth();
     // Queue writes locally and replay them when the connection returns.
     if (db.enablePersistence) {
-      db.enablePersistence({ synchronizeTabs: true }).catch(e => console.warn('persistence:', e && e.code));
+      // Single-tab persistence: no deprecation warning, and if a second tab
+      // already holds the lock this simply resolves to failed-precondition.
+      db.enablePersistence().catch(e => console.warn('persistence:', e && e.code));
     }
     return true;
   } catch(e) { console.error('FB init:', e); db = null; auth = null; return false; }

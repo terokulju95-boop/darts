@@ -1,4 +1,4 @@
-const CACHE = 'darts-v5';
+const CACHE = 'darts-v6';
 
 // App shell. The Firebase SDK and the web fonts live on other origins, so they
 // are cached opportunistically on first successful load (see below) rather than
@@ -33,21 +33,51 @@ self.addEventListener('message', e => {
   if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
+// ---- Cache helpers -------------------------------------------------------
+// The Cache API only supports GET. Writing any other method throws
+// "Failed to execute 'put' on 'Cache': Request method 'POST' is unsupported",
+// and if that promise is left floating it surfaces as an uncaught rejection.
+// Both helpers below check the method themselves and swallow every error, so
+// no cache operation can ever reject into the console.
+function cacheable(req) {
+  return req && req.method === 'GET';
+}
+
+function safePut(req, res) {
+  if (!cacheable(req) || !res) return;
+  if (res.status !== 200 && res.type !== 'opaque') return;
+  let copy;
+  try { copy = res.clone(); } catch (err) { return; }
+  caches.open(CACHE)
+    .then(c => c.put(req, copy))
+    .catch(() => {});          // never leave this promise floating
+}
+
+function safeMatch(req) {
+  if (!cacheable(req)) return Promise.resolve(undefined);
+  return caches.match(req).catch(() => undefined);
+}
+
 function isRuntimeAsset(url) {
   return RUNTIME_HOSTS.indexOf(url.hostname) !== -1;
 }
 
 // Live Firestore/Auth traffic must never be served from cache.
 function isLiveApi(url) {
-  return /firestore\.googleapis\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com|firebaseio\.com|firebaseinstallations\.googleapis\.com/.test(url.hostname);
+  return /firestore\.googleapis\.com|identitytoolkit\.googleapis\.com|securetoken\.googleapis\.com|firebaseio\.com|firebaseinstallations\.googleapis\.com|firebaselogging|google-analytics\.com|googletagmanager\.com/.test(url.hostname);
 }
 
 self.addEventListener('fetch', e => {
   const req = e.request;
-  if (req.method !== 'GET') return;
+
+  // Anything that is not a plain GET is left entirely to the network.
+  if (!cacheable(req)) return;
 
   let url;
   try { url = new URL(req.url); } catch (err) { return; }
+
+  // Only http(s) — skip chrome-extension:, blob:, data: and friends.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
   // 1. Live API calls: network only. Firestore has its own offline layer.
   if (isLiveApi(url)) return;
@@ -56,14 +86,9 @@ self.addEventListener('fetch', e => {
   //    This is the fix for being locked out of the app when offline.
   if (isRuntimeAsset(url)) {
     e.respondWith(
-      caches.match(req).then(cached => {
-        const network = fetch(req).then(res => {
-          if (res && (res.status === 200 || res.type === 'opaque')) {
-            const copy = res.clone();
-            caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
-          }
-          return res;
-        }).catch(() => cached);
+      safeMatch(req).then(cached => {
+        const network = fetch(req).then(res => { safePut(req, res); return res; })
+                                  .catch(() => cached);
         return cached || network;
       })
     );
@@ -73,25 +98,18 @@ self.addEventListener('fetch', e => {
   // 3. HTML: network-first so a new deploy is picked up immediately.
   if (req.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/')) {
     e.respondWith(
-      fetch(req).then(res => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
-        }
-        return res;
-      }).catch(() => caches.match(req).then(c => c || caches.match('./index.html')))
+      fetch(req)
+        .then(res => { safePut(req, res); return res; })
+        .catch(() => safeMatch(req).then(c => c || caches.match('./index.html')))
     );
     return;
   }
 
   // 4. Everything else (icons etc.): cache-first.
   e.respondWith(
-    caches.match(req).then(cached => cached || fetch(req).then(res => {
-      if (res && res.status === 200 && res.type !== 'opaque') {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
-      }
-      return res;
-    }).catch(() => cached))
+    safeMatch(req).then(cached =>
+      cached || fetch(req).then(res => { safePut(req, res); return res; })
+                          .catch(() => cached)
+    )
   );
 });
