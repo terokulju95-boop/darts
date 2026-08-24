@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.13';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.14';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -2546,6 +2546,56 @@ function halveitNext(){
 }
 
 // ==================== GAME OVER ====================
+// A dart is a checkout attempt only when the score in front of it IS a double:
+// 2..40 even, or 50 for the bull. From 41 upwards the dart is a setup shot, and
+// from an odd number no double exists at all. Darts are replayed one at a time
+// because the score between them is not stored anywhere.
+//
+// Only double out is measured. Master out finishes on a treble as well and
+// "Vapaa" needs no double at all, so the question has no answer in those modes.
+// A turn entered as a total (summasyöttö) has no darts, so its whole leg is
+// skipped rather than guessed at.
+function x01CheckoutStats(g, turns) {
+  const out = { attempts: 0, hits: 0 };
+  if(g.checkoutMode !== 'double') return out;
+  const isDouble = s => (s <= 40 && s >= 2 && s % 2 === 0) || s === 50;
+  const byLeg = {};
+  (turns||[]).forEach(t => { const l = t.leg||0; (byLeg[l] = byLeg[l] || []).push(t); });
+  Object.values(byLeg).forEach(legTurns => {
+    if(legTurns.some(t => t.sum)) return;               // no per-dart data
+    let left = g.startScore;
+    legTurns.forEach(t => {
+      let cur = left;
+      (t.darts||[]).forEach(d => {
+        if(cur === null) return;
+        if(isDouble(cur)) out.attempts++;
+        cur -= dartValue(d);
+        if(cur === 0) { if(!t.bust) out.hits++; cur = null; }
+        else if(cur < 2) cur = null;                    // bust, rest of turn is void
+      });
+      // A busted turn ends on the score it started from.
+      if(!t.bust) left -= (t.scored||0);
+    });
+  });
+  return out;
+}
+
+// First 9: the three-dart average over the first three turns of a leg. Points
+// only, so a leg entered as totals still counts. A leg that ended in fewer than
+// three turns has no first 9 and is left out instead of being scaled up.
+function x01First9(turns) {
+  const out = { points: 0, legs: 0 };
+  const byLeg = {};
+  (turns||[]).forEach(t => { const l = t.leg||0; (byLeg[l] = byLeg[l] || []).push(t); });
+  Object.values(byLeg).forEach(legTurns => {
+    if(legTurns.length < 3) return;
+    // A bust is a 0-point turn, the same rule the 3-dart average uses.
+    out.points += legTurns.slice(0,3).reduce((s,t) => s + (t.bust ? 0 : (t.scored||0)), 0);
+    out.legs++;
+  });
+  return out;
+}
+
 function endGame() {
   const g=S.game;
   const dur=g.endTime?Math.round((g.endTime-g.startTime)/1000):0;
@@ -2611,7 +2661,11 @@ function endGame() {
       // Best checkout over every leg this player closed, not just the last turn.
       const checkout = allTurns.filter(h=>h.legWon).reduce((m,h)=>Math.max(m, h.scored||0), 0);
       const heatmap = pl.heatmap || {};
-      gamePlayerStats[pl.id] = { avg, best, busts, turns, totalPoints, s180, s100plus, checkout, heatmap };
+      const co = x01CheckoutStats(g, allTurns);
+      const f9 = x01First9(allTurns);
+      gamePlayerStats[pl.id] = { avg, best, busts, turns, totalPoints, s180, s100plus, checkout, heatmap,
+                                 checkoutAttempts:co.attempts, checkoutHits:co.hits,
+                                 first9Points:f9.points, first9Legs:f9.legs };
     });
   }
 
@@ -2871,7 +2925,7 @@ async function goStats() {
     if(!g.players)return;
     g.players.forEach(p=>{
       const soloGame = (g.players||[]).length < 2;
-      if(!st[p.id])st[p.id]={name:p.name,games:0,multiGames:0,soloGames:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0};
+      if(!st[p.id])st[p.id]={name:p.name,games:0,multiGames:0,soloGames:0,wins:0,types:{},streak:0,maxStreak:0,last10:[],avgSum:0,avgCount:0,bestTurn:0,bestCheckout:0,total180:0,total100:0,coHits:0,coAttempts:0,f9Points:0,f9Legs:0};
       st[p.id].games++;
       if(!soloGame) st[p.id].multiGames++;
       else st[p.id].soloGames++;
@@ -2891,12 +2945,21 @@ async function goStats() {
         if(ps.checkout>st[p.id].bestCheckout) st[p.id].bestCheckout=ps.checkout;
         st[p.id].total180+=(ps.s180||0);
         st[p.id].total100+=(ps.s100plus||0);
+        // Games saved before v5.14 have none of these; missing simply adds 0.
+        st[p.id].coHits+=(ps.checkoutHits||0);
+        st[p.id].coAttempts+=(ps.checkoutAttempts||0);
+        st[p.id].f9Points+=(ps.first9Points||0);
+        st[p.id].f9Legs+=(ps.first9Legs||0);
       }
     });
   });
   // Compute averages
   Object.values(st).forEach(s=>{
     s.allTimeAvg = s.avgCount>0?Math.round(s.avgSum/s.avgCount*10)/10:0;
+    s.checkoutPct = s.coAttempts>0?Math.round(s.coHits/s.coAttempts*100):null;
+    // 3 turns = 9 darts, so the points of a first 9 divided by 3 is the same
+    // three-dart average the rest of the screen uses.
+    s.first9Avg = s.f9Legs>0?Math.round(s.f9Points/s.f9Legs/3*10)/10:null;
   });
   // Reverse last10 so newest is last (for chart left-to-right)
   Object.values(st).forEach(s=>s.last10.reverse());
@@ -2941,6 +3004,8 @@ function renderStats() {
 
         <div style="font-size:11px;color:var(--muted);letter-spacing:2px;margin:10px 0 4px;">📊 HEITTOTILASTOT</div>
         ${s.allTimeAvg?`<div class="stat-row"><span>All-time avg</span><span class="stat-val">${s.allTimeAvg}</span></div>`:''}
+        ${s.first9Avg!=null?`<div class="stat-row"><span>First 9 avg</span><span class="stat-val">${s.first9Avg}</span></div>`:''}
+        ${s.checkoutPct!=null?`<div class="stat-row"><span>Checkout-%</span><span class="stat-val">${s.checkoutPct}% <span style="color:var(--muted);font-size:11px;">(${s.coHits}/${s.coAttempts})</span></span></div>`:''}
         ${s.bestTurn?`<div class="stat-row"><span>Paras vuoro</span><span class="stat-val">${s.bestTurn} pts</span></div>`:''}
         ${s.bestCheckout?`<div class="stat-row"><span>Korkein checkout</span><span class="stat-val">${s.bestCheckout} pts</span></div>`:''}
         ${s.total180?`<div class="stat-row"><span>180-kierrokset</span><span class="stat-val">x${s.total180} 🎯</span></div>`:''}
