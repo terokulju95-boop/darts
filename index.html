@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.8';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.9';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -597,6 +597,118 @@ function tUnwrapRounds(rounds) {
 
 const TOURNAMENT_SCHEMA = 1;
 
+// An unfinished tournament is the SAME document as the finished one. It gets
+// its id when the tournament starts and is updated in place until it ends, so
+// there is never a duplicate and nothing is lost if the device is wiped.
+//
+// An unfinished document deliberately carries NO finishedAt field.
+// fbLoadTournaments() orders by finishedAt, and Firestore drops documents that
+// lack the ordered field — that is what keeps unfinished tournaments out of the
+// history list. fbLoadTournaments() also filters on done as a second guard.
+function tournamentDoc(t, game, finished) {
+  const num = v => (typeof v === 'number' ? v : null);
+  const d = {
+    schemaVersion: TOURNAMENT_SCHEMA,
+    done: !!finished,
+    format: t.format || null,
+    champion: t.champion || null,
+    players: t.players || [],
+    gameType: t.gameType || null,
+    checkoutMode: t.checkoutMode || null,
+    customScore: num(t.customScore),
+    phase: t.phase || null,
+    startedAt: num(t.startedAt) || Date.now(),
+    groupPlayers: t.groupPlayers || null,
+    groupMatches: t.groupMatches || null,
+    groupStandings: t.groupStandings || null,
+    knockoutPlayers: t.knockoutPlayers || null,
+    knockoutRound: num(t.knockoutRound),
+    knockoutMatches: tWrapRounds(t.knockoutMatches),   // invariantti 14
+    bracket: tWrapRounds(t.bracket),                   // invariantti 14
+    losersMatch: t.losersMatch || null,
+    tiebreakNeeded: t.tiebreakNeeded || null,
+    round: num(t.round),
+    size: num(t.size),
+    legsGroup: num(t.legsGroup),
+    legsKnockout: num(t.legsKnockout),
+    legsSpecial: num(t.legsSpecial),
+    // A finished tournament has no match in progress.
+    currentMatch: finished ? null : (t.currentMatch || null),
+    activeGame: finished ? null : (game || null),
+  };
+  if (finished) d.finishedAt = firebase.firestore.FieldValue.serverTimestamp();
+  return d;
+}
+
+// Rebuilds the live tournament object from a stored document. Every list is
+// given a real array: the render code walks these without null checks, and a
+// stored null would crash the bracket exactly like a missing field.
+function tournamentFromDoc(d) {
+  const t = { ...d };
+  delete t.activeGame; delete t.schemaVersion; delete t.id;
+  t.docId = d.id;
+  t.done = false;
+  t.format = d.format || 'long';
+  t.phase = d.phase || 'group';
+  t.players = d.players || [];
+  t.groupPlayers = d.groupPlayers || d.players || [];
+  t.groupMatches = d.groupMatches || [];
+  t.groupStandings = d.groupStandings || [];
+  t.knockoutPlayers = d.knockoutPlayers || [];
+  t.knockoutRound = typeof d.knockoutRound === 'number' ? d.knockoutRound : 0;
+  t.knockoutMatches = tUnwrapRounds(d.knockoutMatches);
+  t.bracket = d.bracket ? tUnwrapRounds(d.bracket) : null;
+  t.round = typeof d.round === 'number' ? d.round : 0;
+  t.losersMatch = d.losersMatch || null;
+  t.tiebreakNeeded = d.tiebreakNeeded || null;
+  return t;
+}
+
+let _tCheckpointAt = 0;
+let _tCheckpointWarned = false;
+
+// Writes the tournament, and the match in progress, to Firestore. Throttled:
+// nav() calls this indirectly on every screen change. Pass true at a real
+// boundary (tournament start, end of a leg, app going to the background).
+function tCheckpoint(force) {
+  const t = S.tournament;
+  if (!t || !t.docId || t.done || !db) return;
+  const now = Date.now();
+  if (!force && (now - _tCheckpointAt) < 20000) return;
+  _tCheckpointAt = now;
+  try {
+    // The tournament's own state does not change during a match, so without
+    // the live game a per-leg checkpoint would store nothing new.
+    const g = (t.currentMatch && S.game && !S.game.gameOver) ? S.game : null;
+    // Fire and forget: invariant 4 — offline this promise never settles.
+    db.collection('darts_tournaments').doc(t.docId)
+      .set(tournamentDoc(t, g, false))
+      .catch(e => {
+        console.error('tCheckpoint:', e);
+        // Report once per session. Every leg would be unusable noise, but
+        // silence is how the nested-array bug survived two releases.
+        if (!_tCheckpointWarned) {
+          _tCheckpointWarned = true;
+          showToast('Turnauksen varmuustallennus ei onnistu', 'error');
+        }
+      });
+  } catch(e) { console.error('tCheckpoint:', e); }
+}
+
+async function fbLoadActiveTournaments() {
+  if (!db) return [];
+  try {
+    const snap = await db.collection('darts_tournaments')
+      .where('done', '==', false).limit(10).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.done === false)
+      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+  } catch(e) {
+    console.error('fbLoadActiveTournaments:', e);
+    return [];
+  }
+}
+
 async function saveTournamentToFirebase(t) {
   if (!t) return;
   // Credit the champion before anything that can fail.
@@ -609,17 +721,11 @@ async function saveTournamentToFirebase(t) {
   } catch(e) { console.error('tournamentWins:', e); }
   try {
     if (!db) return;
-    await db.collection('darts_tournaments').add({
-      schemaVersion: TOURNAMENT_SCHEMA,
-      format: t.format || null,
-      champion: t.champion || null,
-      players: t.players || [],
-      gameType: t.gameType || null,
-      groupStandings: t.groupStandings || null,
-      knockoutMatches: tWrapRounds(t.knockoutMatches),
-      bracket: tWrapRounds(t.bracket),
-      finishedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    });
+    const payload = tournamentDoc(t, null, true);
+    // Same document the checkpoints wrote to, so finishing cannot duplicate it.
+    // A tournament started before v5.9 has no docId; fall back to add().
+    if (t.docId) await db.collection('darts_tournaments').doc(t.docId).set(payload);
+    else await db.collection('darts_tournaments').add(payload);
     invalidateTournamentCache();   // muuten uusi turnaus ei n\u00e4y historiassa 5 min
     showToast('Turnaus tallennettu \u2713', 'success');
   } catch(e) {
@@ -634,7 +740,10 @@ async function fbLoadTournaments() {
   try {
     const snap = await db.collection('darts_tournaments')
       .orderBy('finishedAt', 'desc').limit(100).get();
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // orderBy('finishedAt') already drops unfinished documents, but do not let
+    // that subtlety be the only thing standing between them and the history.
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.done !== false);
     // finishedAt is a serverTimestamp, so a document written while offline
     // reads back with the field still empty. Sort locally as a safety net and
     // put those pending writes first — they are the newest thing this device did.
@@ -742,6 +851,7 @@ let S = {
   // localStorage, so putting a historical tournament there would destroy a
   // tournament that is still in progress.
   detailTournament: null,
+  resumeTournaments: [],
 };
 
 // Players stored in Firebase (not localStorage) so they persist across browser data clears
@@ -1045,6 +1155,9 @@ function saveTournamentLocal() {
       localStorage.setItem('darts_tournament', JSON.stringify(S.tournament));
     }
   } catch(e) {}
+  // Every existing call site already means "the tournament changed", so this
+  // is the one place a remote checkpoint has to be hooked in. Throttled.
+  tCheckpoint(false);
 }
 
 function clearTournamentLocal() {
@@ -1080,6 +1193,7 @@ function render() {
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
     'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
     'tournament-history': renderTournamentHistory,
+    'tournament-resume': renderTournamentResume,
     'tournament-history-detail': renderTournamentHistoryDetail,
     records: renderRecords, leaderboard: renderLeaderboard,
     'player-profile': renderPlayerProfile,
@@ -1705,6 +1819,7 @@ function processX01(dart) {
     } else {
       // Start new leg
       showToast(p.name+' voitti erän! '+p.legsWon+'/'+(g.legsToWin||1), 'success');
+      if(S.tournament && S.tournament.currentMatch) tCheckpoint(true);
       g.currentDarts=[]; g.modifier=null;
       // Keep history across legs: every stat in endGame() is derived from it.
       g.legIndex = (g.legIndex||0)+1;
@@ -1969,6 +2084,7 @@ function sumConfirm() {
       endGame();
     } else {
       showToast(p.name+' voitti erän!', 'success');
+      if(S.tournament && S.tournament.currentMatch) tCheckpoint(true);
       g.legIndex = (g.legIndex||0)+1;
       g.players.forEach(pl=>{ pl.score=g.startScore; });
       g.currentPlayerIndex=(g.currentPlayerIndex+1)%g.players.length;
@@ -2950,9 +3066,11 @@ function startQuickTournament() {
   for(let i=0;i<size;i+=2){
     matches.push({p1:padded[i],p2:padded[i+1],winner:padded[i+1]==='bye'?padded[i]:null,round:0,idx:matches.length});
   }
-  S.tournament = {...t, format:'quick', bracket:[matches], currentMatch:null, round:0, size, done:false};
+  S.tournament = {...t, format:'quick', bracket:[matches], currentMatch:null, round:0, size, done:false,
+    docId: genId(), startedAt: Date.now()};
   advanceByes();
   nav('tournament-bracket');
+  tCheckpoint(true);
 }
 
 function startLongTournament() {
@@ -2977,8 +3095,10 @@ function startLongTournament() {
     losersMatch: null,
     currentMatch: null,
     tiebreakNeeded: null, // {players:[], reason:''}
+    docId: genId(), startedAt: Date.now(),
   };
   nav('tournament-bracket');
+  tCheckpoint(true);
 }
 
 // ---- HELPERS ----
@@ -3440,7 +3560,7 @@ function renderQuickTournamentBracket(div) {
     <div class="scrollbox" style="overflow-y:auto;flex:1;">${html}</div>
     ${t.done?
       `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
-      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
+      `<div style="padding:14px;"><button class="btn large danger" onclick="abandonTournament()">Lopeta turnaus</button></div>`
     }`;
 }
 
@@ -3688,7 +3808,7 @@ function renderLongTournamentBracket(div) {
     <div class="scrollbox" style="overflow-y:auto;flex:1;padding-bottom:20px;">${html}</div>
     ${t.done?
       `<div style="padding:14px;"><button class="btn large" onclick="S.tournament=null;clearTournamentLocal();nav('home');">Uusi turnaus</button></div>`:
-      `<div style="padding:14px;"><button class="btn large danger" onclick="if(confirm('Lopeta turnaus?')){S.tournament=null;clearTournamentLocal();nav('home');}">Lopeta turnaus</button></div>`
+      `<div style="padding:14px;"><button class="btn large danger" onclick="abandonTournament()">Lopeta turnaus</button></div>`
     }`;
 }
 
@@ -3830,6 +3950,103 @@ function thMatchCard(t, m) {
     </div>
     ${legs?`<div style="text-align:center;padding:6px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);">${legs}</div>`:''}
   </div>`;
+}
+
+// ---- RESUMING AN UNFINISHED TOURNAMENT ----
+// The device that started the tournament keeps it in localStorage. If that is
+// gone — browser data cleared, or a different device — the tournament is still
+// in Firestore and is offered here. A device id would not work: it lives in
+// localStorage too and would be wiped by the very thing this guards against.
+
+async function goResumeTournament() {
+  S.resumeTournaments = await fbLoadActiveTournaments();
+  nav('tournament-resume');
+  render();
+}
+
+function resumeTournament(id) {
+  const d = (S.resumeTournaments || []).find(x => x.id === id);
+  if (!d) return;
+  S.tournament = tournamentFromDoc(d);
+  S.game = d.activeGame || null;
+  saveTournamentLocal();
+  if (S.game) {
+    try { localStorage.setItem('darts_game', JSON.stringify(S.game)); } catch(e) {}
+    nav('game');
+  } else {
+    S.tournament.currentMatch = null;   // no match to return to
+    nav('tournament-bracket');
+  }
+  showToast('Turnaus palautettu', 'success');
+}
+
+async function discardActiveTournament(id) {
+  if (!confirm('Poistetaanko keskener\u00e4inen turnaus? T\u00e4t\u00e4 ei voi peruuttaa.')) return;
+  try {
+    if (db) await db.collection('darts_tournaments').doc(id).delete();
+    S.resumeTournaments = (S.resumeTournaments || []).filter(x => x.id !== id);
+    render();
+    showToast('Turnaus poistettu', 'success');
+  } catch(e) {
+    console.error('discardActiveTournament:', e);
+    showToast('Poisto ep\u00e4onnistui', 'error');
+  }
+}
+
+// "Lopeta turnaus" must also remove the unfinished document, or the app would
+// keep offering to resume a tournament the user deliberately ended.
+async function abandonTournament() {
+  if (!confirm('Lopeta turnaus? Keskener\u00e4inen turnaus poistetaan my\u00f6s pilvest\u00e4.')) return;
+  const id = S.tournament && S.tournament.docId;
+  S.tournament = null; S.game = null;
+  clearTournamentLocal();
+  try { localStorage.removeItem('darts_game'); } catch(e) {}
+  nav('home');
+  if (id && db) {
+    try { await db.collection('darts_tournaments').doc(id).delete(); }
+    catch(e) { console.error('abandonTournament:', e); }
+  }
+}
+
+function renderTournamentResume() {
+  const div = el('div','screen');
+  const list = S.resumeTournaments || [];
+  let content;
+  if (!list.length) {
+    content = `<div class="empty-state"><span class="ei">\u2705</span>
+      <p>Ei keskener\u00e4isi\u00e4 turnauksia.</p></div>`;
+  } else {
+    content = `<div class="history-list">` + list.map(d => {
+      const names = (d.players||[]).map(id => esc(thName(d, id))).join(' \u00b7 ');
+      const phase = d.phase === 'knockout' ? 'Pudotuspelit' : d.format === 'quick' ? 'Pikaturnaus' : 'Alkusarja';
+      const played = (d.groupMatches||[]).filter(m=>m && m.played).length;
+      const total = (d.groupMatches||[]).length;
+      return `<div class="history-card">
+        <div class="history-card-header">
+          <div class="h-type">\u23f8\ufe0f ${esc(phase)}</div>
+          <div class="h-date">${esc(thDate(d.startedAt))}</div>
+        </div>
+        <div class="h-players">${names}</div>
+        ${total?`<div style="font-size:12px;color:var(--muted);margin-top:3px;">Alkusarja ${played}/${total} ottelua pelattu</div>`:''}
+        ${d.activeGame?`<div style="font-size:12px;color:var(--accent);margin-top:3px;">Ottelu kesken \u2013 jatkuu er\u00e4n alusta</div>`:''}
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="btn" style="flex:1;" onclick="resumeTournament('${esc(d.id)}')">Jatka</button>
+          <button class="btn danger" style="flex:0 0 auto;" onclick="discardActiveTournament('${esc(d.id)}')">Hylk\u00e4\u00e4</button>
+        </div>
+      </div>`;
+    }).join('') + `</div>`;
+  }
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">\u2039 Ohita</button>
+      <div class="header-title">Keskener\u00e4inen turnaus</div>
+    </div>
+    <div style="padding:10px 14px;color:var(--muted);font-size:13px;">
+      T\u00e4lt\u00e4 laitteelta ei l\u00f6ytynyt kesken olevaa turnausta, mutta pilvest\u00e4 l\u00f6ytyi.
+    </div>
+    ${content}
+  `;
+  return div;
 }
 
 function renderTournamentHistory() {
@@ -4443,6 +4660,16 @@ async function init() {
     if (await migratePlayerStats()) await loadPlayers();
     render();
     flushPendingGames();
+    // Nothing in progress on this device: a tournament may still be waiting in
+    // Firestore, from a wiped browser or the other device. One read.
+    if (!S.tournament && !S.game) {
+      const active = await fbLoadActiveTournaments();
+      if (active.length) {
+        S.resumeTournaments = active;
+        nav('tournament-resume');
+        render();
+      }
+    }
   });
 }
 function setAppHeight() {
@@ -4461,6 +4688,9 @@ document.addEventListener('visibilitychange', () => {
     if(db) flushPendingGames();
     setTimeout(setAppHeight, 100);
     setTimeout(setAppHeight, 500);
+  } else {
+    // Leaving the app is the last chance to persist the current leg.
+    tCheckpoint(true);
   }
 });
 window.addEventListener("load", () => {
