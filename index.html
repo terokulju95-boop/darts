@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.12';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.13';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -2549,15 +2549,46 @@ function halveitNext(){
 function endGame() {
   const g=S.game;
   const dur=g.endTime?Math.round((g.endTime-g.startTime)/1000):0;
-  // Build turn log for history detail view
+  // Build turn log for history detail view.
+  // Two things have to be reconstructed here. History is stored per player and
+  // is never cleared at a leg change (that clearing was a real bug), so the
+  // order the turns happened in is not the order they are stored in — and the
+  // score left after a turn is not on the player object any more, only the
+  // score they ended the game with.
+  //
+  // Turn order inside a leg is a rotation: leg 0 opens with player 0, and every
+  // later leg opens with the player after whoever won the leg before it, which
+  // is exactly what the leg-change code does to currentPlayerIndex.
   const turnLog = [];
   const isX01save = ['501','301','701','custom_x01'].includes(g.type);
   if(isX01save) {
+    const seatCount = g.players.length || 1;
+    const legOpener = { 0: 0 };
     g.players.forEach((pl,pi) => {
       (pl.history||[]).forEach(turn => {
-        turnLog.push({ player:pl.name, playerIdx:pi, darts:turn.darts||[], scored:turn.scored||0, bust:turn.bust||false, remaining:pl.score });
+        if(turn.legWon) legOpener[(turn.leg||0)+1] = (pi+1) % seatCount;
       });
     });
+    const rows = [];
+    g.players.forEach((pl,pi) => {
+      const left = {};          // running score, per leg
+      const round = {};         // how many turns this player has had in the leg
+      (pl.history||[]).forEach(turn => {
+        const leg = turn.leg || 0;
+        if(left[leg] === undefined) left[leg] = g.startScore;
+        // A bust scores nothing: the turn ends on the score it started from.
+        if(!turn.bust) left[leg] -= (turn.scored||0);
+        round[leg] = (round[leg] === undefined) ? 0 : round[leg]+1;
+        rows.push({
+          leg, round: round[leg],
+          seat: (pi - (legOpener[leg]||0) + seatCount) % seatCount,
+          entry: { player:pl.name, playerIdx:pi, darts:turn.darts||[], scored:turn.scored||0,
+                   bust:turn.bust||false, leg, remaining:left[leg] },
+        });
+      });
+    });
+    rows.sort((a,b) => a.leg-b.leg || a.round-b.round || a.seat-b.seat);
+    rows.forEach(r => turnLog.push(r.entry));
   }
   // Calculate per-player game stats
   const gamePlayerStats = {};
