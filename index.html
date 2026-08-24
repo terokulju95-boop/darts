@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.14';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.15';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -1171,8 +1171,45 @@ function nav(screen, extra={}) {
   render();
 }
 
+// Keep the screen on while a game is being played. The browser drops the lock
+// by itself whenever the tab is hidden, so it has to be taken again on the way
+// back — that is what the visibilitychange handler at the bottom of the file
+// does. A browser without the API (iOS before 16.4, or any page not served over
+// https) and a refused request are both left alone: no lock, no error, and the
+// next call is free to try again.
+let wakeLock = null;
+let wakeLockPending = false;
+
+function wakeLockWanted() {
+  return S.screen === 'game' && !!S.game && !S.game.gameOver;
+}
+
+function syncWakeLock() {
+  const want = wakeLockWanted();
+  if(want) {
+    if(wakeLock || wakeLockPending) return;
+    if(typeof navigator === 'undefined' || !navigator.wakeLock) return;
+    if(document.visibilityState === 'hidden') return;
+    wakeLockPending = true;
+    try {
+      Promise.resolve(navigator.wakeLock.request('screen')).then(s => {
+        wakeLockPending = false;
+        // The game may have ended while the request was still in flight.
+        if(!wakeLockWanted()) { try { s.release(); } catch(e) {} return; }
+        wakeLock = s;
+        if(s.addEventListener) s.addEventListener('release', () => { wakeLock = null; });
+      }).catch(() => { wakeLockPending = false; });
+    } catch(e) { wakeLockPending = false; }
+  } else if(wakeLock) {
+    const s = wakeLock;
+    wakeLock = null;
+    try { s.release(); } catch(e) {}
+  }
+}
+
 function render() {
   setAppHeight && setAppHeight();
+  syncWakeLock();
   const app = document.getElementById('app');
 
   // Re-rendering the same screen must not throw the user back to the top.
@@ -4864,6 +4901,8 @@ window.addEventListener('online', () => { if(db) flushPendingGames(); });
 document.addEventListener('visibilitychange', () => {
   if(document.visibilityState === 'visible') {
     if(db) flushPendingGames();
+    // The browser released the screen lock when we went away; take it back.
+    syncWakeLock();
     setTimeout(setAppHeight, 100);
     setTimeout(setAppHeight, 500);
   } else {
