@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.11';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.12';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -3926,22 +3926,56 @@ function thFormatName(t) {
   return (t && t.format === 'quick') ? '\u26a1 Pikaturnaus' : '\u2694\ufe0f Sarja + pudotuspelit';
 }
 
-// groupStandings is stored unsorted, in the original player order. The live
-// screen breaks ties with head-to-head, but groupMatches is not saved, so that
-// step cannot be reproduced here — see thTieNote().
+// Head-to-head between two players of a stored tournament. Mirrors
+// tHeadToHead(), but takes the tournament as an argument: invariant 13, nothing
+// in this section may read S.tournament. Returns 0 when the pairing was never
+// played, or when the document predates v5.9 and has no groupMatches at all —
+// that zero is what tells the caller the order is genuinely undecided.
+function thHeadToHead(t, id1, id2) {
+  const ms = (t && Array.isArray(t.groupMatches)) ? t.groupMatches : [];
+  const m = ms.find(x => x && ((x.p1 === id1 && x.p2 === id2) || (x.p1 === id2 && x.p2 === id1)));
+  if (!m || !m.winner) return 0;
+  return m.winner === id1 ? -1 : 1;
+}
+
+// Played group matches only; an unplayed one has no result to show. Also the
+// guard against a document where groupMatches is null or malformed.
+function thGroupMatches(t) {
+  const ms = (t && Array.isArray(t.groupMatches)) ? t.groupMatches : [];
+  return ms.filter(m => m && m.played);
+}
+
+// groupStandings is stored unsorted, in the original player order. groupMatches
+// is stored too, so the first three steps are the same ones tSortStandings()
+// used during the tournament: points, leg wins, head-to-head. Leg losses and
+// name only break what the tournament itself left undecided — they keep the
+// rendered list stable rather than expressing a rule.
 function thStandings(t) {
   const rows = ((t && t.groupStandings) || []).slice();
   rows.sort((a, b) =>
     (b.points || 0) - (a.points || 0) ||
     (b.legWins || 0) - (a.legWins || 0) ||
+    thHeadToHead(t, a.id, b.id) ||
     (a.legLosses || 0) - (b.legLosses || 0) ||
     String(thName(t, a.id)).localeCompare(String(thName(t, b.id)), 'fi'));
   return rows;
 }
 
-function thTieNote(a, b) {
+function thTiedOnRecord(a, b) {
   if (!a || !b) return false;
   return (a.points || 0) === (b.points || 0) && (a.legWins || 0) === (b.legWins || 0);
+}
+
+// Level on points and leg wins, and the head-to-head does not separate them
+// either. Only then is the printed order something the data does not support.
+function thTieUnresolved(t, a, b) {
+  return thTiedOnRecord(a, b) && thHeadToHead(t, a.id, b.id) === 0;
+}
+
+// Level on points and leg wins, but the match between them decided it. This is
+// the case the history could not show before.
+function thTieBrokenByHeadToHead(t, a, b) {
+  return thTiedOnRecord(a, b) && thHeadToHead(t, a.id, b.id) !== 0;
 }
 
 // Same look as tMatchCard(), but never playable and never reads S.tournament.
@@ -4154,22 +4188,38 @@ function renderTournamentHistoryDetail() {
       </div>
       ${standings.map((s,i)=>{
         const col = thCol(t, s.id);
+        // Why this player is below the one above, when the table alone cannot
+        // show it: identical points and leg wins, separated by their match.
+        const h2h = i > 0 && thTieBrokenByHeadToHead(t, standings[i-1], s);
         return `<div style="display:grid;grid-template-columns:26px 1fr 34px 34px 38px;padding:9px 12px;border-bottom:1px solid var(--border);">
           <div style="font-family:var(--fd);font-size:15px;color:var(--muted);">${i+1}</div>
           <div style="font-size:14px;font-weight:700;color:${col.bg};">${esc(thName(t, s.id))}</div>
           <div style="text-align:center;font-size:13px;">${s.played||0}</div>
           <div style="text-align:center;font-size:13px;">${s.legWins||0}</div>
           <div style="text-align:center;font-family:var(--fd);font-size:16px;color:var(--accent);">${s.points||0}</div>
-        </div>`;
+        </div>` + (h2h ? `<div style="padding:5px 12px 7px 38px;border-bottom:1px solid var(--border);font-size:11px;color:rgba(255,200,80,0.9);">
+          \u2694\ufe0f Keskin\u00e4inen ottelu ratkaisi j\u00e4rjestyksen \u2013 pisteet ja er\u00e4voitot olivat tasan
+        </div>` : '');
       }).join('')}
     </div>`;
-    // Head-to-head is not part of the saved document, so a tie broken that way
-    // cannot be reconstructed. Say so instead of implying a firm order.
-    if (standings.some((s,i)=>thTieNote(s, standings[i+1]))) {
+    // Only warn about an order the stored data does not actually support. A tie
+    // the head-to-head settles is no longer one of those cases, and the two
+    // reasons a tie can stay open are different enough to name separately.
+    if (standings.some((s,i)=>thTieUnresolved(t, s, standings[i+1]))) {
+      const stored = thGroupMatches(t).length > 0;
       html += `<div style="margin:0 14px 10px;padding:9px 12px;border-radius:10px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.3);font-size:12px;color:rgba(255,200,80,0.95);">
-        \u26a0\ufe0f Osa sijoituksista oli tasan pisteiss\u00e4 ja er\u00e4voitoissa. Keskin\u00e4isi\u00e4 otteluita ei tallenneta, joten t\u00e4m\u00e4 j\u00e4rjestys voi poiketa turnauksen aikana n\u00e4ytetyst\u00e4.
+        \u26a0\ufe0f ${stored
+          ? 'Osa sijoituksista oli tasan pisteiss\u00e4 ja er\u00e4voitoissa, eik\u00e4 keskin\u00e4ist\u00e4 ottelua pelattu. N\u00e4iden pelaajien j\u00e4rjestys on ratkaisematta.'
+          : 'Osa sijoituksista oli tasan pisteiss\u00e4 ja er\u00e4voitoissa. T\u00e4m\u00e4n turnauksen keskin\u00e4isi\u00e4 otteluita ei tallennettu, joten t\u00e4m\u00e4 j\u00e4rjestys voi poiketa turnauksen aikana n\u00e4ytetyst\u00e4.'}
       </div>`;
     }
+  }
+
+  // Match-by-match group results. Stored since v5.9, shown since v5.12.
+  const groupMatches = thGroupMatches(t);
+  if (groupMatches.length) {
+    html += `<div style="font-family:var(--fd);font-size:13px;color:var(--accent);letter-spacing:2px;padding:8px 14px 4px;">ALKUSARJAN OTTELUT (${groupMatches.length})</div>`;
+    groupMatches.forEach(m => { html += thMatchCard(t, m); });
   }
 
   const knock = tUnwrapRounds(t.knockoutMatches);
@@ -4182,7 +4232,7 @@ function renderTournamentHistoryDetail() {
     });
   }
 
-  if (!standings.length && !rounds.length) {
+  if (!standings.length && !rounds.length && !groupMatches.length) {
     html += `<div class="empty-state"><span class="ei">\u{1F5C2}</span>
       <p>Ei yksityiskohtaisia tietoja.<br>T\u00e4st\u00e4 turnauksesta tallennettiin vain lopputulos.</p></div>`;
   }
