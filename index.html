@@ -299,7 +299,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.19';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.20';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -896,6 +896,7 @@ let S = {
   players: [],
   playersLoaded: false,
   setup: { gameType: null, config: {}, selected: [] },
+  updateReady: false,   // a new service worker is installed and waiting
   game: null,
   history: [],
   historyLoaded: false,
@@ -1370,6 +1371,7 @@ function renderHome() {
         \u23f3 ${pendingGameCount()} peli\u00e4 odottaa tallennusta
       </div>` : ''}
     <div class="home-menu">
+      ${S.updateReady ? updateMenuButton() : ''}
       <button class="menu-btn primary" onclick="startNew()">
         <span class="icon">🎮</span><span class="label">UUSI PELI</span><span class="arrow">›</span>
       </button>
@@ -1404,13 +1406,38 @@ function renderHome() {
       <button class="menu-btn" onclick="goRecords()" style="border-color:rgba(255,165,0,0.3);">
         <span class="icon">&#9971;</span><span class="label">Ennätykset</span><span class="arrow" style="color:var(--gold);">›</span>
       </button>
-      <button class="menu-btn" id="update-btn" onclick="checkForUpdate()" style="border-color:rgba(68,136,255,0.25);color:var(--muted);">
-        <span class="icon" style="font-size:20px;">&#8635;</span><span class="label" id="update-label" style="color:var(--text);">Pakota päivitys</span><span class="arrow" style="color:var(--blue);">›</span>
-      </button>
+      ${S.updateReady ? '' : updateMenuButton()}
 
     </div>
   `;
   return div;
+}
+
+// One definition, two positions: first while an update waits, last otherwise.
+// Duplicating the markup would let the two copies drift apart.
+function updateMenuButton() {
+  const waiting = S.updateReady;
+  return `<button class="menu-btn" id="update-btn" onclick="checkForUpdate()"
+      style="border-color:${waiting ? 'var(--blue)' : 'rgba(68,136,255,0.25)'};
+             ${waiting ? 'background:rgba(68,136,255,0.10);' : ''}color:var(--muted);">
+      <span class="icon" style="font-size:20px;">${waiting ? '\u{1F535}' : '&#8635;'}</span>
+      <span class="label" id="update-label" style="color:var(--text);${waiting ? 'font-weight:700;' : ''}">
+        ${waiting ? 'P\u00e4ivitys saatavilla \u2013 asenna' : 'Pakota p\u00e4ivitys'}</span>
+      <span class="arrow" style="color:var(--blue);">\u203a</span>
+    </button>`;
+}
+
+// A waiting service worker is state, not a DOM tweak. The old code wrote
+// straight into the button with getElementById, so the next render() erased it
+// and the notice was visible only to a user who happened to be on the home
+// screen at that exact moment.
+//
+// Called from the update poller every 60 s, so it must be idempotent and must
+// not re-render when nothing changed.
+function markUpdateReady() {
+  if (S.updateReady) return;
+  S.updateReady = true;
+  if (S.screen === 'home') render();
 }
 
 function confirmLogout() {
@@ -5193,20 +5220,31 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').then(reg => {
       console.log('SW ok');
-      reg.addEventListener('updatefound', () => {
+      window._swReg = reg;
+
+      // Three separate ways an update becomes visible, and all three are
+      // needed. 'updatefound' only fires for a worker installing right now: a
+      // worker that finished installing during an earlier visit is already
+      // sitting in reg.waiting and fires nothing, so a plain listener would
+      // miss the most common case entirely.
+      const noticeIfWaiting = () => {
+        if (reg.waiting && navigator.serviceWorker.controller) markUpdateReady();
+      };
+
+      noticeIfWaiting();                               // 1. already waiting at startup
+
+      reg.addEventListener('updatefound', () => {      // 2. installing right now
         const nw = reg.installing;
+        if (!nw) return;
         nw.addEventListener('statechange', () => {
-          if(nw.state==='installed' && navigator.serviceWorker.controller) {
-            window._swReg = reg;
-            const btn=document.getElementById('update-btn');
-            const lbl=document.getElementById('update-label');
-            if(btn){btn.style.borderColor='rgba(68,136,255,0.7)';}
-            if(lbl)lbl.textContent='🔵 Päivitys saatavilla!';
-          }
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) markUpdateReady();
         });
       });
-      setInterval(()=>reg.update(),60000);
-    }).catch(e=>console.warn('SW fail:',e));
+
+      setInterval(() => {                              // 3. poll, then re-check
+        reg.update().then(noticeIfWaiting).catch(() => {});
+      }, 60000);
+    }).catch(e => console.warn('SW fail:', e));
   });
 }
 
