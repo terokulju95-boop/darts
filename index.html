@@ -299,7 +299,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.18';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.19';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -3056,6 +3056,147 @@ function localStorageReport() {
   return { rows, total };
 }
 
+// ---------------------------------------------------------------- IMPORT
+// The only place in this app that deletes data on purpose, and the only place
+// that writes cumulative fields as absolute values instead of
+// FieldValue.increment(). That is a deliberate exception to invariant 6: the
+// exported numbers are already totals, so increment() would add the account to
+// itself. A restore is not an accumulation.
+
+const IMPORT_FORMAT = 1;
+const BATCH_LIMIT = 400;            // Firestore rejects a batch over 500 ops
+
+function validateImport(obj) {
+  const bad = msg => ({ valid: false, error: msg });
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return bad('Tiedosto ei ole varmuuskopio.');
+  if (obj.exportFormat !== IMPORT_FORMAT) {
+    return bad('Tuntematon tiedostomuoto (exportFormat: ' + String(obj.exportFormat) + '). Odotettiin ' + IMPORT_FORMAT + '.');
+  }
+  for (const key of ['games', 'players', 'tournaments']) {
+    if (!Array.isArray(obj[key])) return bad('Kentt\u00e4 "' + key + '" puuttuu tai ei ole lista.');
+    for (const doc of obj[key]) {
+      if (!doc || typeof doc !== 'object') return bad('Kentt\u00e4 "' + key + '" sis\u00e4lt\u00e4\u00e4 kelvottoman rivin.');
+      if (!doc.id || typeof doc.id !== 'string') {
+        return bad('Kentt\u00e4 "' + key + '" sis\u00e4lt\u00e4\u00e4 dokumentin ilman tunnistetta.');
+      }
+    }
+  }
+  return { valid: true, counts: {
+    games: obj.games.length, players: obj.players.length, tournaments: obj.tournaments.length } };
+}
+
+async function commitInChunks(ops) {
+  // ops: [{ ref, data }] for a write, or [{ ref }] for a delete.
+  let committed = 0;
+  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+    const batch = db.batch();
+    ops.slice(i, i + BATCH_LIMIT).forEach(op => {
+      if (op.data) batch.set(op.ref, op.data); else batch.delete(op.ref);
+    });
+    await batch.commit();
+    committed += Math.min(BATCH_LIMIT, ops.length - i);
+  }
+  return committed;
+}
+
+async function applyImport(obj) {
+  const v = validateImport(obj);
+  if (!v.valid) throw new Error(v.error);
+  if (!db) throw new Error('Ei yhteytt\u00e4 tietokantaan.');
+
+  // A queued game flushes after the import and increments the counters we are
+  // about to restore. Refuse rather than corrupt them.
+  const queued = pendingGameCount();
+  if (queued) {
+    throw new Error(queued + ' peli\u00e4 odottaa yh\u00e4 tallennusta. Odota synkronointi loppuun ennen palautusta.');
+  }
+
+  const current = await fetchAllCollections();
+  const plan = [
+    ['darts_games', obj.games],
+    ['darts_players', obj.players],
+    ['darts_tournaments', obj.tournaments],
+  ];
+
+  const writes = [], deletes = [];
+  plan.forEach(([coll, docs]) => {
+    const keep = new Set(docs.map(d => d.id));
+    docs.forEach(d => {
+      const { id, ...data } = d;
+      writes.push({ ref: db.collection(coll).doc(id), data });
+    });
+    (current[coll] || []).forEach(({ id }) => {
+      if (!keep.has(id)) deletes.push({ ref: db.collection(coll).doc(id) });
+    });
+  });
+
+  const written = await commitInChunks(writes);
+  const removed = await commitInChunks(deletes);
+
+  // Everything derived from this data is now wrong.
+  S.history = []; S.historyLoaded = false; S.historyCachedAt = null;
+  S.stats = null; S.statsLoaded = false; S.statsCachedAt = null;
+  S.players = []; S.playersLoaded = false;
+  S.tournamentHistory = []; S.tournamentHistoryLoaded = false;
+  S.dataMeasure = null;
+  try { localStorage.removeItem('darts_players_cache'); } catch(e) {}
+
+  return { written, removed };
+}
+
+// The file picker and FileReader are browser APIs the test harness does not
+// have. Everything above this line is testable; everything below is not.
+async function importFileChosen(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  input.value = '';                            // allow picking the same file again
+  let obj;
+  try {
+    obj = JSON.parse(await file.text());
+  } catch(e) {
+    showToast('Tiedostoa ei voi lukea \u2013 ei kelvollista JSONia', 'error');
+    return;
+  }
+  const v = validateImport(obj);
+  if (!v.valid) { alert('Palautus ei onnistu.\n\n' + v.error); return; }
+
+  const c = v.counts;
+  const first = 'Palautetaan varmuuskopiosta:\n\n'
+    + '\u00b7 ' + c.games + ' peli\u00e4\n'
+    + '\u00b7 ' + c.players + ' pelaajaa\n'
+    + '\u00b7 ' + c.tournaments + ' turnausta\n\n'
+    + 'T\u00c4M\u00c4 KORVAA KAIKEN NYKYISEN DATAN. Kaikki tiedot, joita ei ole '
+    + 'tiedostossa, poistetaan pysyv\u00e4sti \u2013 my\u00f6s viennin j\u00e4lkeen pelatut pelit.\n\n'
+    + 'Jatketaanko?';
+  if (!confirm(first)) return;
+
+  // A restore is irreversible, so take a copy of what is about to be replaced.
+  // The documents have to be read anyway to know what to delete.
+  if (confirm('Ladataanko ensin varmuuskopio nykyisest\u00e4 tilasta?\n\n'
+      + 'Suositeltavaa: t\u00e4m\u00e4 on ainoa tapa peruuttaa palautus.')) {
+    try {
+      const safety = await buildExportData();
+      downloadJson('darts-ennen-palautusta-' + new Date().toISOString().slice(0, 10) + '.json', safety);
+    } catch(e) {
+      if (!confirm('Varmuuskopion lataus ep\u00e4onnistui. Jatketaanko silti?')) return;
+    }
+  }
+
+  const btn = document.getElementById('import-btn-label');
+  if (btn) btn.textContent = 'Palautetaan\u2026';
+  try {
+    const r = await applyImport(obj);
+    showToast(r.written + ' dokumenttia palautettu \u2713', 'success');
+    await loadPlayers();
+    nav('home');
+  } catch(e) {
+    console.error('importFileChosen:', e);
+    alert('Palautus ep\u00e4onnistui.\n\n' + ((e && e.message) || 'Tuntematon virhe'));
+  } finally {
+    if (btn) btn.textContent = '\u2b06\ufe0f Palauta JSON-tiedostosta';
+  }
+}
+
 function renderSettings() {
   const div = el('div','screen');
   const m = S.dataMeasure;
@@ -3140,6 +3281,20 @@ function renderSettings() {
           Maksaa saman lukum\u00e4\u00e4r\u00e4n kuin mittaus.
         </div>
         <button class="btn large" id="export-btn" onclick="exportAllData()">\u2b07\ufe0f Vie JSON-tiedostoksi</button>
+
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+          <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px;">
+            Palautus <b style="color:#ff8098;">korvaa kaiken nykyisen datan</b>.
+            Kaikki, mit\u00e4 tiedostossa ei ole, poistetaan pysyv\u00e4sti \u2014 my\u00f6s
+            viennin j\u00e4lkeen pelatut pelit. Sovellus tarjoaa varmuuskopiota
+            nykyisest\u00e4 tilasta ennen kuin se tekee mit\u00e4\u00e4n.
+          </div>
+          <label class="btn large secondary" style="display:block;text-align:center;cursor:pointer;">
+            <span id="import-btn-label">\u2b06\ufe0f Palauta JSON-tiedostosta</span>
+            <input type="file" accept="application/json,.json"
+              onchange="importFileChosen(this)" style="display:none;">
+          </label>
+        </div>
       </div>
 
       <div class="settings-section" style="border-top:1px solid var(--border);">

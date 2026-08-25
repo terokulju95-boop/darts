@@ -1,4 +1,4 @@
-const CACHE = 'darts-v23';
+const CACHE = 'darts-v24';
 
 // App shell. The Firebase SDK and the web fonts live on other origins, so they
 // are cached opportunistically on first successful load (see below) rather than
