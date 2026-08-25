@@ -299,7 +299,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.17';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.18';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -422,6 +422,7 @@ async function doLogin() {
 // A finished game is written to localStorage BEFORE the network call, so a
 // failed or interrupted write can never destroy the result.
 function queuePendingGame(data, profiles) {
+  warnIfDocTooBig(data, 'darts_games');   // canary for the 1 MiB document limit
   try {
     const q = JSON.parse(localStorage.getItem('darts_pending') || '[]');
     const pid = genId();
@@ -822,6 +823,71 @@ async function deleteAllGames() {
     render();
     showToast('Kaikki pelit poistettu', 'success');
   } catch(e) { showToast('Poisto epäonnistui','error'); }
+}
+
+// ==================== DATA SIZE ====================
+// Firestore does not count bytes the way JSON.stringify does. Numbers cost 8
+// bytes whatever their value, booleans 1, strings their UTF-8 length plus one,
+// and every field name is stored with every document. Measuring with
+// JSON.stringify().length would report roughly the wrong number in both
+// directions, and a size check that is wrong is worse than none: it would read
+// "fine" right up to the failure.
+//
+// Same formula as testit/audit-firestore.js. If one changes, change both.
+
+const DOC_LIMIT_BYTES = 1048576;              // Firestore hard limit per document
+const DOC_WARN_BYTES = Math.round(DOC_LIMIT_BYTES * 0.8);
+
+function utf8Len(str) {
+  // TextEncoder is available in every browser this app runs in; the fallback
+  // keeps the harness and any odd WebView working.
+  try { return new TextEncoder().encode(str).length; }
+  catch(e) { return unescape(encodeURIComponent(str)).length; }
+}
+
+function fieldSize(name) { return utf8Len(name) + 1; }
+
+function valueSize(v) {
+  if (v === null || v === undefined) return 1;
+  if (typeof v === 'boolean') return 1;
+  if (typeof v === 'number') return 8;
+  if (typeof v === 'string') return utf8Len(v) + 1;
+  if (Array.isArray(v)) return v.reduce((s, x) => s + valueSize(x), 0);
+  if (typeof v === 'object') {
+    // A serverTimestamp sentinel is not the value it will become.
+    if (v.__server || (v.isEqual && !Object.keys(v).length)) return 8;
+    if (typeof v.toDate === 'function') return 8;            // Firestore Timestamp
+    return Object.entries(v).reduce((s, [k, x]) => s + fieldSize(k) + valueSize(x), 0) + 32;
+  }
+  return 8;
+}
+
+function docSize(doc, docId) {
+  const idLen = utf8Len(String(docId || '')) ;
+  return idLen + 1
+       + Object.entries(doc || {}).reduce((s, [k, v]) => s + fieldSize(k) + valueSize(v), 0)
+       + 32;
+}
+
+function kib(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
+  return (bytes / 1048576).toFixed(2) + ' MiB';
+}
+
+// The canary for the 1 MiB limit. It should never fire with this app's
+// documents — the heaviest measured game is under 3 % of the limit — but a
+// runaway array would otherwise fail as a bare rejected write.
+let _docWarnShown = false;
+function warnIfDocTooBig(doc, docId) {
+  const bytes = docSize(doc, docId);
+  if (bytes < DOC_WARN_BYTES) return false;
+  console.error('document near Firestore 1 MiB limit:', docId, bytes);
+  if (!_docWarnShown) {
+    _docWarnShown = true;
+    showToast('Tallennettava tieto on ep\u00e4tavallisen suuri (' + kib(bytes) + ')', 'error');
+  }
+  return true;
 }
 
 // ==================== STATE ====================
@@ -1251,6 +1317,10 @@ function renderHome() {
         <div style="font-size:10px;color:var(--muted);letter-spacing:1px;margin-top:2px;">v${APP_VERSION}</div>
         <div style="margin-top:4px;font-size:11px;color:var(--muted);">${currentUser?currentUser.email:''}</div>
       </div>
+      <button onclick="nav('settings')" aria-label="Asetukset"
+        style="position:absolute;top:10px;left:16px;background:none;border:1px solid var(--border);color:var(--muted);font-size:17px;line-height:1;padding:6px 9px;border-radius:8px;cursor:pointer;">
+        \u2699\ufe0f
+      </button>
       <button onclick="confirmLogout()"
         style="position:absolute;top:12px;right:16px;background:none;border:1px solid rgba(255,51,85,0.3);color:var(--muted);font-size:11px;padding:5px 10px;border-radius:8px;cursor:pointer;font-family:var(--fu);font-weight:600;letter-spacing:1px;">
         ULOS
@@ -2881,22 +2951,224 @@ function renderStats() {
 
 
 // ==================== SETTINGS ====================
+// ==================== DATA MEASURE + EXPORT ====================
+// Both read every document in all three collections. That is ~510 reads of a
+// 50 000/day quota that every app in this Firebase project shares, so neither
+// runs on its own — the user presses a button.
+
+const COLLECTIONS = ['darts_games', 'darts_players', 'darts_tournaments'];
+
+async function fetchAllCollections() {
+  if (!db) throw new Error('Ei yhteytt\u00e4 tietokantaan');
+  const out = {};
+  for (const name of COLLECTIONS) {
+    // No orderBy: a document missing the ordering field would be dropped, and
+    // here the point is to see everything that exists.
+    const snap = await db.collection(name).get();
+    out[name] = snap.docs.map(d => ({ id: d.id, data: d.data() }));
+  }
+  return out;
+}
+
+async function measureData() {
+  const all = await fetchAllCollections();
+  let totalBytes = 0, reads = 0, largest = null;
+  const collections = COLLECTIONS.map(name => {
+    let bytes = 0;
+    (all[name] || []).forEach(({ id, data }) => {
+      const n = docSize(data, id);
+      bytes += n;
+      reads++;
+      if (!largest || n > largest.bytes) {
+        largest = { collection: name, id, bytes, pctOfLimit: +(n / DOC_LIMIT_BYTES * 100).toFixed(2) };
+      }
+    });
+    totalBytes += bytes;
+    return { name, count: (all[name] || []).length, bytes };
+  });
+  return { collections, totalBytes, reads, largest, measuredAt: Date.now() };
+}
+
+// Separated from the download so the content can be tested: the harness has no
+// Blob, no object URLs and no real anchor clicks.
+async function buildExportData() {
+  const all = await fetchAllCollections();
+  return {
+    exportFormat: 1,
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    account: currentUser ? currentUser.email : null,
+    games:       (all.darts_games       || []).map(x => ({ id: x.id, ...x.data })),
+    players:     (all.darts_players     || []).map(x => ({ id: x.id, ...x.data })),
+    tournaments: (all.darts_tournaments || []).map(x => ({ id: x.id, ...x.data })),
+  };
+}
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportAllData() {
+  const btn = document.getElementById('export-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Kootaan\u2026'; }
+  try {
+    const data = await buildExportData();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadJson('darts-varmuuskopio-' + stamp + '.json', data);
+    showToast(data.games.length + ' peli\u00e4 vietiin tiedostoon \u2713', 'success');
+  } catch(e) {
+    console.error('exportAllData:', e);
+    showToast('Vienti ep\u00e4onnistui \u2013 tiedostoa ei luotu', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '\u2b07\ufe0f Vie JSON-tiedostoksi'; }
+  }
+}
+
+async function runMeasure() {
+  const btn = document.getElementById('measure-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Mitataan\u2026'; }
+  S.dataMeasureError = null;
+  try {
+    S.dataMeasure = await measureData();
+  } catch(e) {
+    console.error('runMeasure:', e);
+    S.dataMeasure = null;
+    S.dataMeasureError = (e && (e.code || e.message)) || 'Tuntematon virhe';
+  }
+  render();
+}
+
+// localStorage is a separate budget from Firestore and has its own ceiling.
+function localStorageReport() {
+  const rows = [];
+  let total = 0;
+  const add = (label, bytes) => { rows.push({ label, bytes }); total += bytes; };
+  const size = k => { try { return utf8Len(localStorage.getItem(k) || ''); } catch(e) { return 0; } };
+  add('Kesken olevat pelit', parkedIds().reduce((n, id) => n + size(gameKey(id)), 0));
+  add('Offline-jono', size('darts_pending'));
+  add('Pelaajav\u00e4limuisti', size('darts_players_cache'));
+  add('Turnaus', size('darts_tournament'));
+  return { rows, total };
+}
+
 function renderSettings() {
-  const div=el('div','screen');
-  div.innerHTML=`
+  const div = el('div','screen');
+  const m = S.dataMeasure;
+  const ls = localStorageReport();
+
+  const measureBlock = S.dataMeasureError
+    ? `<div style="margin-top:12px;padding:11px 13px;border-radius:10px;
+        background:rgba(255,51,85,0.10);border:1px solid rgba(255,51,85,0.35);
+        font-size:12px;color:#ff8098;">
+        \u26a0\ufe0f Mittaus ep\u00e4onnistui: ${esc(String(S.dataMeasureError))}</div>`
+    : !m ? ''
+    : `<div style="margin-top:14px;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tr style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px;">
+            <th style="text-align:left;padding:4px 0;">Kokoelma</th>
+            <th style="text-align:right;">Kpl</th>
+            <th style="text-align:right;">Koko</th>
+          </tr>
+          ${m.collections.map(c => `<tr style="border-top:1px solid var(--border);">
+            <td style="padding:6px 0;">${esc(c.name)}</td>
+            <td style="text-align:right;">${c.count}</td>
+            <td style="text-align:right;font-family:var(--fd);">${kib(c.bytes)}</td></tr>`).join('')}
+          <tr style="border-top:1px solid var(--border);font-weight:700;">
+            <td style="padding:6px 0;">Yhteens\u00e4</td>
+            <td style="text-align:right;">${m.reads}</td>
+            <td style="text-align:right;font-family:var(--fd);color:var(--accent);">${kib(m.totalBytes)}</td></tr>
+        </table>
+
+        ${m.largest ? `<div style="margin-top:14px;padding:12px 13px;border-radius:11px;
+          background:var(--card);border:1px solid var(--border);">
+          <div style="font-family:var(--fu);font-size:11px;letter-spacing:1px;color:var(--muted);">
+            SUURIN DOKUMENTTI</div>
+          <div style="margin-top:5px;font-size:13px;word-break:break-all;">
+            ${esc(m.largest.collection)} / ${esc(m.largest.id)}</div>
+          <div style="margin-top:7px;display:flex;align-items:center;gap:9px;">
+            <div style="flex:1;height:7px;border-radius:4px;background:var(--card2);overflow:hidden;">
+              <div style="height:100%;width:${Math.max(1, Math.min(100, m.largest.pctOfLimit))}%;
+                background:${m.largest.pctOfLimit > 80 ? 'var(--red)' : m.largest.pctOfLimit > 50 ? 'var(--gold)' : 'var(--accent)'};"></div>
+            </div>
+            <div style="font-family:var(--fd);font-size:14px;">${kib(m.largest.bytes)}</div>
+          </div>
+          <div style="margin-top:5px;font-size:11px;color:var(--muted);">
+            ${m.largest.pctOfLimit} % dokumentin 1 MiB rajasta</div>
+        </div>` : `<div style="margin-top:12px;font-size:12px;color:var(--muted);">
+            Ei yht\u00e4\u00e4n dokumenttia.</div>`}
+
+        <div style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.6;">
+          Luku ei sis\u00e4ll\u00e4 <b>indeksej\u00e4</b>. Firestore laskee projektin 1 GiB
+          kiinti\u00f6\u00f6n my\u00f6s indeksimerkinn\u00e4t, eik\u00e4 asiakas n\u00e4e niit\u00e4 lainkaan \u2014
+          todellinen kulutus on t\u00e4t\u00e4 suurempi. T\u00e4m\u00e4 luku kertoo suuruusluokan,
+          ei tarkkaa osuutta.
+        </div>
+      </div>`;
+
+  div.innerHTML = `
     <div class="header">
-      <button class="back-btn" onclick="nav('home')">‹ Takaisin</button>
-      <div class="header-title">Firebase Tiedot</div>
+      <button class="back-btn" onclick="nav('home')">\u2039 Takaisin</button>
+      <div class="header-title">Asetukset</div>
     </div>
-    <div class="settings-section">
-      <div class="settings-desc">
-        ✅ Firebase on konfiguroitu automaattisesti.<br><br>
-        <strong>Projekti:</strong> hakemuspaivakirja<br>
-        <strong>Tietokanta:</strong> Firestore<br>
-        <strong>Kokoelma:</strong> darts_games
+    <div class="scrollbox" style="overflow-y:auto;flex:1;">
+
+      <div class="settings-section">
+        <div style="font-family:var(--fu);font-size:12px;letter-spacing:1px;color:var(--muted);margin-bottom:9px;">
+          FIRESTOREN DATA</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px;">
+          Mittaus lukee jokaisen dokumentin kaikista kolmesta kokoelmasta.
+          Se maksaa yhden <b>luvun</b> per dokumentti p\u00e4iv\u00e4kiinti\u00f6st\u00e4
+          (50 000/vrk), joka on yhteinen kaikille t\u00e4m\u00e4n Firebase-projektin
+          sovelluksille. Siksi se ei tapahdu itsest\u00e4\u00e4n.
+        </div>
+        <button class="btn large" id="measure-btn" onclick="runMeasure()">\u{1F4CF} Mittaa data</button>
+        ${measureBlock}
       </div>
-      <button class="btn large" onclick="testFb()">Testaa yhteys</button>
-      <div id="fb-status" style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center;"></div>
+
+      <div class="settings-section" style="border-top:1px solid var(--border);">
+        <div style="font-family:var(--fu);font-size:12px;letter-spacing:1px;color:var(--muted);margin-bottom:9px;">
+          VARMUUSKOPIO</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px;">
+          Kaikki pelit, pelaajat ja turnaukset yhteen JSON-tiedostoon.
+          Historiaan mahtuu 400 peli\u00e4, ja sen j\u00e4lkeen vanhimmat poistetaan
+          pysyv\u00e4sti \u2014 vienti on ainoa tapa s\u00e4ilytt\u00e4\u00e4 ne.
+          Maksaa saman lukum\u00e4\u00e4r\u00e4n kuin mittaus.
+        </div>
+        <button class="btn large" id="export-btn" onclick="exportAllData()">\u2b07\ufe0f Vie JSON-tiedostoksi</button>
+      </div>
+
+      <div class="settings-section" style="border-top:1px solid var(--border);">
+        <div style="font-family:var(--fu);font-size:12px;letter-spacing:1px;color:var(--muted);margin-bottom:9px;">
+          T\u00c4M\u00c4 LAITE</div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          ${ls.rows.map(r => `<tr style="border-top:1px solid var(--border);">
+            <td style="padding:6px 0;color:var(--muted);">${r.label}</td>
+            <td style="text-align:right;font-family:var(--fd);">${kib(r.bytes)}</td></tr>`).join('')}
+          <tr style="border-top:1px solid var(--border);font-weight:700;">
+            <td style="padding:6px 0;">Yhteens\u00e4</td>
+            <td style="text-align:right;font-family:var(--fd);">${kib(ls.total)}</td></tr>
+        </table>
+        <div style="margin-top:9px;font-size:11px;color:var(--muted);line-height:1.6;">
+          Selaimen localStorage-raja on noin 5 MB. T\u00e4m\u00e4 on eri budjetti kuin
+          Firestore, eik\u00e4 se synkronoidu mihink\u00e4\u00e4n.
+        </div>
+      </div>
+
+      <div class="settings-section" style="border-top:1px solid var(--border);">
+        <div style="font-family:var(--fu);font-size:12px;letter-spacing:1px;color:var(--muted);margin-bottom:9px;">
+          YHTEYS</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:11px;">
+          Projekti hakemuspaivakirja \u00b7 Firestore \u00b7 versio ${APP_VERSION}
+        </div>
+        <button class="btn large secondary" onclick="testFb()">Testaa yhteys</button>
+        <div id="fb-status" style="margin-top:12px;font-size:13px;color:var(--muted);text-align:center;"></div>
+      </div>
+
     </div>
   `;
   return div;
