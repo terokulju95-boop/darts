@@ -316,7 +316,7 @@ html,body { height:100%; background:var(--bg); color:var(--text); font-family:va
 <div id="bust-overlay" class="bust-overlay"><div class="bust-text">BUST!</div></div>
 
 <script>
-const APP_VERSION = '5.15';   // bump this together with CACHE in sw.js
+const APP_VERSION = '5.16';   // bump this together with CACHE in sw.js
 
 // ==================== FIREBASE ====================
 const FIREBASE_CONFIG = {
@@ -389,7 +389,7 @@ async function login(email, password) {
 
 async function logout() {
   if (!auth) return;
-  localStorage.removeItem('darts_game');
+  clearAllGames();
   S.game = null;
   S.offline = false;
   await auth.signOut();
@@ -664,6 +664,14 @@ function tournamentFromDoc(d) {
   return t;
 }
 
+// The game a tournament checkpoint should store: the match on screen, or the
+// match waiting on the pause list. Null only when the match is really gone.
+function tMatchGame() {
+  if (S.game && S.game.isTournamentMatch && !S.game.gameOver) return S.game;
+  const pk = parkedGames().find(x => x.game && x.game.isTournamentMatch);
+  return pk ? pk.game : null;
+}
+
 let _tCheckpointAt = 0;
 let _tCheckpointWarned = false;
 
@@ -679,7 +687,10 @@ function tCheckpoint(force) {
   try {
     // The tournament's own state does not change during a match, so without
     // the live game a per-leg checkpoint would store nothing new.
-    const g = (t.currentMatch && S.game && !S.game.gameOver) ? S.game : null;
+    // S.game is not necessarily the match any more — another game can be on
+    // screen while the match waits. Storing S.game would put a stranger into
+    // the tournament; storing null would destroy the match on the other device.
+    const g = t.currentMatch ? tMatchGame() : null;
     // Fire and forget: invariant 4 — offline this promise never settles.
     db.collection('darts_tournaments').doc(t.docId)
       .set(tournamentDoc(t, g, false))
@@ -1226,7 +1237,7 @@ function render() {
     home: renderHome, players: renderPlayers,
     'setup-type': renderSetupType, 'setup-config': renderSetupConfig,
     'setup-players': renderSetupPlayers,
-    game: renderGame, gameover: renderGameOver,
+    game: renderGame, gameover: renderGameOver, parked: renderParkedGames,
     history: renderHistory, 'history-detail': renderHistoryDetail, stats: renderStats, settings: renderSettings,
     'tournament-setup': renderTournamentSetup, 'tournament-bracket': renderTournamentBracket,
     'tournament-history': renderTournamentHistory,
@@ -1292,6 +1303,20 @@ function renderHome() {
         </span>
         <span style="color:var(--accent);font-size:22px;line-height:1;">›</span>
       </div>` : ''}
+    ${loadGames().length ? `<div onclick="nav('parked')"
+        style="margin:0 16px 10px;padding:14px 16px;border-radius:14px;
+        background:linear-gradient(135deg,rgba(68,136,255,0.18),rgba(68,136,255,0.05));
+        border:1px solid rgba(68,136,255,0.45);
+        display:flex;align-items:center;gap:13px;cursor:pointer;">
+        <span style="font-size:26px;line-height:1;">\u23f8\ufe0f</span>
+        <span style="flex:1;text-align:left;">
+          <span style="display:block;font-family:var(--fu);font-weight:700;font-size:15px;
+            color:var(--blue);letter-spacing:1px;">JATKA PELI\u00c4</span>
+          <span style="display:block;font-size:12px;color:var(--muted);margin-top:3px;">
+            ${parkedCountLabel()}</span>
+        </span>
+        <span style="color:var(--blue);font-size:22px;line-height:1;">\u203a</span>
+      </div>` : ''}
     ${pendingGameCount() ? `<div style="margin:0 16px 8px;padding:9px 12px;border-radius:10px;
         background:rgba(255,215,0,0.10);border:1px solid rgba(255,215,0,0.35);
         font-size:12px;color:var(--gold);text-align:center;">
@@ -1342,10 +1367,11 @@ function renderHome() {
 }
 
 function confirmLogout() {
-  // An in-progress game is discarded on logout: say so before doing it.
-  const warn = S.game
-    ? 'Kesken oleva peli menetet\u00e4\u00e4n. Kirjaudutaanko silti ulos?'
-    : 'Kirjaudutaanko ulos?';
+  // Games in progress are discarded on logout: say how many before doing it.
+  const n = loadGames().length;
+  const warn = !n ? 'Kirjaudutaanko ulos?'
+    : n === 1 ? 'Kesken oleva peli menetet\u00e4\u00e4n. Kirjaudutaanko silti ulos?'
+    : n + ' kesken olevaa peli\u00e4 menetet\u00e4\u00e4n. Kirjaudutaanko silti ulos?';
   const queued = pendingGameCount();
   const extra = queued ? '\n\nHuom: ' + queued + ' peli\u00e4 odottaa yh\u00e4 tallennusta.' : '';
   if (confirm(warn + extra)) logout();
@@ -1606,11 +1632,236 @@ function toggleSel(id) {
 
 
 
+// ==================== PARKED GAMES ====================
+// A game used to live in one localStorage key, and the only way off the game
+// screen was to end it — which deleted it. Several games can now be in
+// progress at once: one key per game plus an index listing the ids.
+//
+// One key per game, not one key holding a list: renderGame() writes after
+// every dart, and a shared key would serialise every other game with it.
+//
+// The games are the truth and the index is only a list of ids. An id whose
+// game is missing is dropped on read, so a half-finished write cannot leave a
+// permanent ghost in the list.
+
+const PARKED_MAX = 4;                       // games in progress, the active one included
+const GAMES_INDEX = 'darts_games_index';
+const ACTIVE_GAME = 'darts_active_game_id';
+const LEGACY_GAME = 'darts_game';           // one key, one game — up to v5.15
+const gameKey = id => 'darts_game_' + id;
+
+let _gameStorageWarned = false;
+
+function parkedIds() {
+  try { const a = JSON.parse(localStorage.getItem(GAMES_INDEX) || '[]'); return Array.isArray(a) ? a : []; }
+  catch(e) { return []; }
+}
+
+// No truncation here. The cap is enforced where a game is created; silently
+// dropping an id would orphan its key and lose a game without saying so.
+function writeParkedIds(ids) {
+  try { localStorage.setItem(GAMES_INDEX, JSON.stringify(ids)); } catch(e) {}
+}
+
+function readGameById(id) {
+  try { const s = id ? localStorage.getItem(gameKey(id)) : null; return s ? JSON.parse(s) : null; }
+  catch(e) { return null; }
+}
+
+// Every game still in progress, the one on screen included.
+function loadGames() {
+  const ids = parkedIds();
+  const out = [], good = [];
+  ids.forEach(id => {
+    const g = readGameById(id);
+    if (g && g.type && !g.gameOver) { out.push({ id, game: g }); good.push(id); }
+    else { try { localStorage.removeItem(gameKey(id)); } catch(e) {} }
+  });
+  if (good.length !== ids.length) writeParkedIds(good);
+  return out;
+}
+
+// The games that are not on screen right now.
+function parkedGames() {
+  const active = S.game && S.game.id;
+  return loadGames().filter(x => x.id !== active);
+}
+
+function activeGameId() {
+  try { return localStorage.getItem(ACTIVE_GAME); } catch(e) { return null; }
+}
+
+// Writes the game on screen. Called from renderGame() after every dart, so it
+// touches exactly one game key.
+function saveActiveGame() {
+  const g = S.game;
+  if (!g || !g.id) return;
+  try {
+    localStorage.setItem(gameKey(g.id), JSON.stringify(g));
+    localStorage.setItem(ACTIVE_GAME, g.id);
+    const ids = parkedIds();
+    if (!ids.includes(g.id)) writeParkedIds([g.id, ...ids]);
+  } catch(e) {
+    // Usually QuotaExceededError. Reported once per session: renderGame() runs
+    // after every dart, so a toast per call would be unusable noise.
+    console.error('saveActiveGame:', e);
+    if (!_gameStorageWarned) {
+      _gameStorageWarned = true;
+      showToast('Laitteen tallennustila t\u00e4ynn\u00e4 \u2013 peli\u00e4 ei voi tallentaa', 'error');
+    }
+  }
+}
+
+function removeGame(id) {
+  if (!id) return;
+  try { localStorage.removeItem(gameKey(id)); } catch(e) {}
+  writeParkedIds(parkedIds().filter(x => x !== id));
+  if (activeGameId() === id) { try { localStorage.removeItem(ACTIVE_GAME); } catch(e) {} }
+}
+
+function clearAllGames() {
+  parkedIds().forEach(id => { try { localStorage.removeItem(gameKey(id)); } catch(e) {} });
+  try {
+    localStorage.removeItem(GAMES_INDEX);
+    localStorage.removeItem(ACTIVE_GAME);
+    localStorage.removeItem(LEGACY_GAME);
+  } catch(e) {}
+}
+
+// Refusing is the safe answer: dropping an old game to make room would delete
+// something the user never asked to delete.
+function canStartGame() {
+  if (loadGames().length < PARKED_MAX) return true;
+  showToast(PARKED_MAX + ' peli\u00e4 on jo kesken \u2013 jatka tai lopeta jokin niist\u00e4', 'error');
+  nav('parked');
+  return false;
+}
+
+// Leaves the game exactly where it is and goes home. Nothing is deleted: the
+// whole point is that leaving and ending are different actions.
+function pauseGame() {
+  if (!S.game) { nav('home'); return; }
+  saveActiveGame();
+  try { localStorage.removeItem(ACTIVE_GAME); } catch(e) {}
+  S.game = null;
+  nav('home');
+  showToast('Peli j\u00e4i tauolle', 'success');
+}
+
+function resumeParkedGame(id) {
+  const g = readGameById(id);
+  if (!g) { showToast('Peli\u00e4 ei l\u00f6ytynyt', 'error'); nav('parked'); return; }
+  // The game currently on screen has unsaved darts only if it was never
+  // rendered; save it anyway so a direct switch can never drop a turn.
+  if (S.game && S.game.id && S.game.id !== id) saveActiveGame();
+  S.game = g;
+  try { localStorage.setItem(ACTIVE_GAME, id); } catch(e) {}
+  nav('game');
+}
+
+function deleteParkedGame(id) {
+  if (!confirm('Poistetaanko tauolla oleva peli? T\u00e4t\u00e4 ei voi peruuttaa.')) return;
+  removeGame(id);
+  render();
+  showToast('Peli poistettu', 'success');
+}
+
+// Finnish needs the singular here; "1 peliä tauolla" reads as a typo.
+function parkedCountLabel() {
+  const n = loadGames().length;
+  return n === 1 ? '1 peli tauolla' : n + ' peli\u00e4 tauolla';
+}
+
+// One line describing a stored game, per game type. S.game has a different
+// shape in every mode, so there is no shared field to read.
+function gameSummary(g) {
+  const names = (g.players || []).map(p => esc(p.name || '?'));
+  if (['501','301','701','custom_x01'].includes(g.type))
+    return (g.players || []).map(p => `${esc(p.name||'?')} ${p.score}`).join(' \u00b7 ');
+  if (g.type === 'cricket')
+    return (g.players || []).map(p => `${esc(p.name||'?')} ${p.points||0}`).join(' \u00b7 ');
+  if (g.type === 'atc')
+    return (g.players || []).map(p => `${esc(p.name||'?')} \u2192 ${p.target||1}`).join(' \u00b7 ');
+  if (g.type === 'shanghai' || g.type === 'halveit')
+    return (g.players || []).map(p => `${esc(p.name||'?')} ${p.score||0}`).join(' \u00b7 ');
+  return names.join(' \u00b7 ');
+}
+
+function parkedAgeLabel(g) {
+  const ms = Date.now() - (g.startTime || Date.now());
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'juuri nyt';
+  if (min < 60) return min + ' min sitten';
+  const h = Math.floor(min / 60);
+  if (h < 24) return h + ' h sitten';
+  return Math.floor(h / 24) + ' vrk sitten';
+}
+
+function renderParkedGames() {
+  const div = el('div','screen');
+  const list = loadGames();
+  let content;
+  if (!list.length) {
+    content = `<div class="empty-state"><span class="ei">\u23f8\ufe0f</span>
+      <p>Ei kesken olevia pelej\u00e4.</p></div>`;
+  } else {
+    content = list.map(({ id, game }) => {
+      const gName = GAMES.find(x => x.id === game.type)?.name || String(game.type).toUpperCase();
+      const legs = game.legsToWin > 1 ? ' \u00b7 Best of ' + game.legsToWin : '';
+      const isActive = activeGameId() === id;
+      return `<div style="margin:0 14px 10px;padding:13px 15px;border-radius:14px;
+        background:rgba(22,22,34,0.8);border:1px solid ${game.isTournamentMatch?'rgba(255,215,0,0.45)':'var(--border)'};">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="flex:1;">
+            <div style="font-family:var(--fu);font-weight:700;font-size:14px;letter-spacing:1px;
+              color:${game.isTournamentMatch?'var(--gold)':'var(--text)'};">
+              ${game.isTournamentMatch?'\u2694\ufe0f ':''}${esc(gName)}${legs}</div>
+            <div style="font-size:13px;color:var(--text);margin-top:4px;">${gameSummary(game)}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px;">
+              Aloitettu ${parkedAgeLabel(game)}${isActive?' \u00b7 viimeksi avoinna':''}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:11px;">
+          <button class="btn" style="flex:1;" onclick="resumeParkedGame('${id}')">\u25b6 Jatka</button>
+          <button class="btn secondary" style="flex:0 0 auto;" onclick="deleteParkedGame('${id}')">Poista</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  div.innerHTML = `
+    <div class="header">
+      <button class="back-btn" onclick="nav('home')">\u2039 Takaisin</button>
+      <div class="header-title">Pelit tauolla</div>
+    </div>
+    <div class="scrollbox" style="overflow-y:auto;flex:1;padding-top:10px;">${content}</div>
+  `;
+  return div;
+}
+
+// Up to v5.15 the single game in progress lived in 'darts_game'. It is adopted
+// into the list rather than dropped, because the upgrade lands mid-game for
+// whoever happens to be playing. Removing the old key is what stops this from
+// running twice — there is no version flag to guard, and none is needed.
+function migrateLegacyGame() {
+  let g = null;
+  try { const s = localStorage.getItem(LEGACY_GAME); if (!s) return; g = JSON.parse(s); }
+  catch(e) { g = null; }
+  try { localStorage.removeItem(LEGACY_GAME); } catch(e) {}
+  if (!g || typeof g !== 'object' || !g.type || g.gameOver) return;
+  g.id = g.id || genId();
+  try {
+    localStorage.setItem(gameKey(g.id), JSON.stringify(g));
+    localStorage.setItem(ACTIVE_GAME, g.id);
+    writeParkedIds([g.id, ...parkedIds().filter(x => x !== g.id)]);
+  } catch(e) { console.error('migrateLegacyGame:', e); }
+}
+
 // ==================== START GAME ====================
 function startGame() {
+  if (!canStartGame()) return;
   const { gameType, config, selected } = S.setup;
   const players = selected.map(id => S.players.find(p => p.id===id)).filter(Boolean);
-  const base = { type:gameType, gameOver:false, winner:null, startTime:Date.now(), currentPlayerIndex:0, currentDarts:[], modifier:null };
+  const base = { id:genId(), type:gameType, gameOver:false, winner:null, startTime:Date.now(), currentPlayerIndex:0, currentDarts:[], modifier:null };
 
   const isX01 = ['501','301','701','custom_x01'].includes(gameType);
   if (isX01) {
@@ -1645,7 +1896,7 @@ function startGame() {
   }
   S.game.scoreMode = 'dart';
   S.game.sumInput = '';
-  localStorage.setItem('darts_game', JSON.stringify(S.game));
+  saveActiveGame();
   nav('game');
 }
 
@@ -1654,7 +1905,7 @@ function renderGame() {
   const g = S.game;
   if (!g) return renderHome();
   // Persist game state so it survives page refresh/app switch
-  try { localStorage.setItem('darts_game', JSON.stringify(g)); } catch(e) {}
+  saveActiveGame();
   if (g.type === 'cricket')  return renderCricket();
   if (g.type === 'atc')      return renderATC();
   if (g.type === 'shanghai') return renderShanghai();
@@ -1723,6 +1974,7 @@ function renderX01() {
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 10px 3px;">
+        <button class="back-btn" style="font-size:12px;padding:6px 10px;" onclick="pauseGame()">\u23f8 Tauolle</button>
         <button class="back-btn" style="font-size:12px;padding:6px 10px;" onclick="quitGame()">✕ Lopeta</button>
         <div style="display:flex;align-items:center;gap:8px;">
           <div style="font-size:12px;color:var(--muted);">${gName} · ${coName}${g.legsToWin>1?" · Best of "+g.legsToWin:""}</div>
@@ -2240,6 +2492,7 @@ function renderCricket() {
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="pauseGame()">\u23f8 Tauolle</button>
         <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
         <div style="font-size:12px;color:var(--muted);">CRICKET · ${american?'American':'Standard'}</div>
       </div>
@@ -2365,6 +2618,7 @@ function renderATC() {
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="pauseGame()">\u23f8 Tauolle</button>
         <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
         <div style="font-size:12px;color:var(--muted);">AROUND THE CLOCK</div>
       </div>
@@ -2436,6 +2690,7 @@ function renderShanghai() {
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="pauseGame()">\u23f8 Tauolle</button>
         <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
         <div style="font-size:12px;color:var(--muted);">SHANGHAI · Kierros ${g.round}/${g.maxRounds}</div>
       </div>
@@ -2517,6 +2772,7 @@ function renderHalveIt() {
   div.innerHTML = `
     <div class="game-header">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 12px 4px;">
+        <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="pauseGame()">\u23f8 Tauolle</button>
         <button class="back-btn" style="font-size:12px;padding:5px 9px;" onclick="quitGame()">✕ Lopeta</button>
         <div style="font-size:12px;color:var(--muted);">HALVE-IT · Kierros ${g.roundIndex+1}/${g.targets.length}</div>
       </div>
@@ -2752,7 +3008,7 @@ function endGame() {
       // save retries the game record and the profile update together.
     }
   });
-  localStorage.removeItem('darts_game');
+  removeGame(g.id);
   if(g.isTournamentMatch && S.tournament && g.winner) {
     tournamentMatchDone(g.winner.id);
   } else {
@@ -2822,7 +3078,14 @@ function renderGameOver() {
     +'</div></div>';
   return div;
 }
-function quitGame() { if(confirm('Lopeta peli kesken?')){ localStorage.removeItem('darts_game'); S.game=null; nav('home'); } }
+// Ending is destructive and stays that way. Leaving without ending is
+// pauseGame(); the two must not be the same button.
+function quitGame() {
+  if(!confirm('Lopeta peli kesken? Peli poistetaan.')) return;
+  removeGame(S.game && S.game.id);
+  S.game = null;
+  nav('home');
+}
 
 // ==================== HISTORY ====================
 async function goHistory() {
@@ -3452,10 +3715,26 @@ function tAdvanceKnockout() {
 }
 
 // ---- START MATCH ----
+// A tournament has at most one match in progress, so any parked tournament
+// match belongs to this tournament. Tapping the match card again must continue
+// it: starting over would erase the legs already played.
+function tParkedMatch() {
+  return parkedGames().find(x => x.game && x.game.isTournamentMatch) || null;
+}
+
+// True when the caller should stop, because a parked match was resumed or
+// there is no room for another game.
+function tMatchBlocked() {
+  const pk = tParkedMatch();
+  if (pk) { resumeParkedGame(pk.id); return true; }
+  return !canStartGame();
+}
+
 function startGroupMatch(matchIdx) {
   const t = S.tournament;
   const m = t.groupMatches[matchIdx];
   if(!m||m.played) return;
+  if(tMatchBlocked()) return;
   const p1 = S.players.find(x=>x.id===m.p1);
   const p2 = S.players.find(x=>x.id===m.p2);
   if(!p1||!p2) return;
@@ -3463,7 +3742,7 @@ function startGroupMatch(matchIdx) {
   const cfg = tGetGameConfig(t.legsGroup||1);
   const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
   S.game = {
-    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    id:genId(), type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
     currentPlayerIndex:0, currentDarts:[], modifier:null,
     startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
     legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
@@ -3480,6 +3759,7 @@ function startKnockoutMatch(roundIdx, matchIdx) {
   const t = S.tournament;
   const m = t.knockoutMatches[roundIdx][matchIdx];
   if(!m||m.winner||m.p2==='bye') return;
+  if(tMatchBlocked()) return;
   const p1 = S.players.find(x=>x.id===m.p1);
   const p2 = S.players.find(x=>x.id===m.p2);
   if(!p1||!p2) return;
@@ -3487,7 +3767,7 @@ function startKnockoutMatch(roundIdx, matchIdx) {
   const cfg = tGetGameConfig(t.legsKnockout||2);
   const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
   S.game = {
-    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    id:genId(), type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
     currentPlayerIndex:0, currentDarts:[], modifier:null,
     startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
     legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
@@ -3504,13 +3784,14 @@ function startLosersMatch() {
   const t = S.tournament;
   const lm = t.losersMatch;
   if(!lm||lm.winner) return;
+  if(tMatchBlocked()) return;
   const players = lm.players.map(id=>S.players.find(x=>x.id===id)).filter(Boolean);
   if(players.length<2) return;
   t.currentMatch = {type:'losers'};
   const cfg = tGetGameConfig(t.legsSpecial||1);
   const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
   S.game = {
-    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    id:genId(), type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
     currentPlayerIndex:0, currentDarts:[], modifier:null,
     startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
     legs:cfg.legsToWin, legsToWin:cfg.legsToWin,
@@ -3527,12 +3808,13 @@ function startTiebreakMatch() {
   const t = S.tournament;
   const tb = t.tiebreakNeeded;
   if(!tb) return;
+  if(tMatchBlocked()) return;
   const players = tb.players.map(id=>S.players.find(x=>x.id===id)).filter(Boolean);
   t.currentMatch = {type:'tiebreak'};
   const cfg = tGetGameConfig(1);
   const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
   S.game = {
-    type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
+    id:genId(), type:cfg.type, gameOver:false, winner:null, startTime:Date.now(),
     currentPlayerIndex:0, currentDarts:[], modifier:null,
     startScore:isX01?cfg.startScore:0, checkoutMode:cfg.checkoutMode,
     legs:1, legsToWin:1,
@@ -3997,13 +4279,14 @@ function startTournamentMatch(matchIdx) {
   if(t.format==='long') return;
   const m = t.bracket[t.round][matchIdx];
   if(!m||m.winner) return;
+  if(tMatchBlocked()) return;
   const p1=S.players.find(x=>x.id===m.p1);
   const p2=S.players.find(x=>x.id===m.p2);
   if(!p1||!p2) return;
   t.currentMatch={type:'quick',round:t.round,idx:matchIdx};
   const cfg = tGetGameConfig(t.legsKnockout||1);
   const isX01 = ['501','301','701','custom_x01'].includes(cfg.type);
-  S.game={type:cfg.type,gameOver:false,winner:null,startTime:Date.now(),currentPlayerIndex:0,currentDarts:[],modifier:null,
+  S.game={id:genId(),type:cfg.type,gameOver:false,winner:null,startTime:Date.now(),currentPlayerIndex:0,currentDarts:[],modifier:null,
     startScore:isX01?cfg.startScore:0,checkoutMode:cfg.checkoutMode,
     legs:cfg.legsToWin,legsToWin:cfg.legsToWin,
     players:[
@@ -4162,7 +4445,10 @@ function resumeTournament(id) {
   S.resumeTournaments = (S.resumeTournaments || []).filter(x => x.id !== id);
   saveTournamentLocal();
   if (S.game) {
-    try { localStorage.setItem('darts_game', JSON.stringify(S.game)); } catch(e) {}
+    // A match stored before v5.16 has no id, and neither has one restored on a
+    // device that has never seen it.
+    S.game.id = S.game.id || genId();
+    saveActiveGame();
     nav('game');
   } else {
     S.tournament.currentMatch = null;   // no match to return to
@@ -4189,10 +4475,12 @@ async function discardActiveTournament(id) {
 async function abandonTournament() {
   if (!confirm('Lopeta turnaus? Keskener\u00e4inen turnaus poistetaan my\u00f6s pilvest\u00e4.')) return;
   const id = S.tournament && S.tournament.docId;
+  // The match may be on screen or on the pause list; both belong to this
+  // tournament and both go with it.
+  loadGames().forEach(x => { if (x.game && x.game.isTournamentMatch) removeGame(x.id); });
   S.tournament = null; S.game = null;
   S.resumeTournaments = (S.resumeTournaments || []).filter(x => x.id !== id);
   clearTournamentLocal();
-  try { localStorage.removeItem('darts_game'); } catch(e) {}
   nav('home');
   if (id && db) {
     try { await db.collection('darts_tournaments').doc(id).delete(); }
@@ -4836,10 +5124,13 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 
 // ==================== INIT ====================
 function restoreLocalState() {
+  migrateLegacyGame();
   try {
-    const saved = localStorage.getItem('darts_game');
-    if (saved) { S.game = JSON.parse(saved); S.screen = 'game'; }
-  } catch(e) { localStorage.removeItem('darts_game'); }
+    const id = activeGameId();
+    const g = readGameById(id);
+    if (g && !g.gameOver) { S.game = g; S.screen = 'game'; }
+    else if (id) { localStorage.removeItem(ACTIVE_GAME); }
+  } catch(e) {}
   try {
     const savedT = localStorage.getItem('darts_tournament');
     // A tournament and an in-progress match are independent. Restoring only one
